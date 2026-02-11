@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 build/
 dist/
+*.spec
 
 # Arquivos de dados reais
 *.txt

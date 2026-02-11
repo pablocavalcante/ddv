@@ -1,4 +1,5 @@
 import os
+import sys
 import datetime
 import threading
 import concurrent.futures
@@ -14,6 +15,16 @@ from PIL import Image
 from service_access import gerar_mdb_access
 from service_excel import extrair_info_template, processar_arquivo_isolado
 
+# --- FUNÇÃO ESSENCIAL PARA O EXECUTÁVEL (.EXE) ---
+def resource_path(relative_path):
+    """ Retorna o caminho absoluto para o recurso, funciona para dev e PyInstaller """
+    try:
+        # O PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 # Configuração Global do Tema
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -24,7 +35,6 @@ class FrmSelecaoRotina(ctk.CTkFrame):
         self.callback_sucesso = callback_sucesso
         self.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Título
         self.lbl_titulo = ctk.CTkLabel(self, text="Seleção da Rotina", font=("Roboto", 24, "bold"))
         self.lbl_titulo.pack(pady=(40, 30))
 
@@ -32,7 +42,6 @@ class FrmSelecaoRotina(ctk.CTkFrame):
         self.cb_rotinas.pack(pady=10)
         self.cb_rotinas.set("SJ230133")
 
-        # Botão
         self.btn_ok = ctk.CTkButton(self, text="Confirmar e Iniciar", command=self.confirmar, width=200, height=40)
         self.btn_ok.pack(pady=30)
 
@@ -49,14 +58,14 @@ class FrmPrincipal(ctk.CTkFrame):
         self.rotina_selecionada = rotina_escolhida
         self.pack(fill="both", expand=True)
 
-        # --- CARREGAR ÍCONES ---
-        pasta_app = os.path.dirname(__file__)
-        pasta_icons = os.path.join(pasta_app, "icons")
+        # --- CARREGAR ÍCONES USANDO RESOURCE_PATH ---
+        pasta_icons = resource_path("icons")
 
         self.icon_folder = None
         self.icon_play = None
         
         try:
+            # Note o uso do resource_path para garantir que o EXE ache a imagem interna
             self.icon_folder = ctk.CTkImage(light_image=Image.open(os.path.join(pasta_icons, "file_open.png")),
                                             dark_image=Image.open(os.path.join(pasta_icons, "file_open.png")),
                                             size=(20, 20))
@@ -64,12 +73,10 @@ class FrmPrincipal(ctk.CTkFrame):
             self.icon_play = ctk.CTkImage(light_image=Image.open(os.path.join(pasta_icons, "arrow_circle.png")),
                                           dark_image=Image.open(os.path.join(pasta_icons, "arrow_circle.png")),
                                           size=(24, 24))
-        except Exception:
-            print("Aviso: Ícones não encontrados. O programa rodará sem eles.")
+        except Exception as e:
+            print(f"Aviso: Ícones não encontrados ({e}). O programa rodará sem eles.")
 
         # --- LAYOUT ---
-        
-        # Sidebar (Lateral Esquerda)
         self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar.pack(side="left", fill="y")
         
@@ -79,23 +86,19 @@ class FrmPrincipal(ctk.CTkFrame):
         self.lbl_info = ctk.CTkLabel(self.sidebar, text=f"Rotina:\n{rotina_escolhida}", font=("Roboto", 14), text_color="gray70")
         self.lbl_info.pack(pady=10)
 
-        # Área Principal (Direita)
         self.main_area = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.main_area.pack(side="right", fill="both", expand=True, padx=20, pady=20)
 
-        # Inputs de Arquivo
         self.criar_input_arquivo("Arquivo Header:", "txt_header")
         self.criar_input_arquivo("Arquivo Detail:", "txt_detail")
         self.criar_input_arquivo("Arquivo Índices:", "txt_indices")
         self.criar_input_arquivo("Pasta de Saída:", "txt_output", folder=True)
 
-        # Botão Processar
         self.btn_run = ctk.CTkButton(self.main_area, text="PROCESSAR TUDO", command=self.start, 
                                      height=50, font=("Roboto", 16, "bold"), fg_color="#2CC985", hover_color="#229A65",
                                      image=self.icon_play, compound="right") 
         self.btn_run.pack(fill="x", pady=(30, 20))
 
-        # Barra de Progresso e Status
         self.pb = ctk.CTkProgressBar(self.main_area)
         self.pb.pack(fill="x", pady=(10, 5))
         self.pb.set(0)
@@ -129,16 +132,10 @@ class FrmPrincipal(ctk.CTkFrame):
 
     def run(self):
         try:
-            print(">>> INICIANDO O PROCESSO...") 
-            
-            # --- 1. MARCA A HORA DE INÍCIO ---
             tempo_inicio = datetime.datetime.now()
-            
-            # Travar interface
             self.master.after(0, lambda: self.btn_run.configure(state="disabled", text="PROCESSANDO..."))
             self.master.after(0, lambda: self.lbl_status.configure(text="Iniciando leitura..."))
             
-            # Paths
             p_head = self.txt_header.get()
             p_det = self.txt_detail.get()
             p_ind = self.txt_indices.get()
@@ -147,10 +144,8 @@ class FrmPrincipal(ctk.CTkFrame):
             if not p_head or not p_det:
                 raise Exception("Selecione os arquivos Header e Detail!")
 
-            print(f"Lendo Header: {p_head}")
             with open(p_head, 'r', encoding='cp1252') as f: lines_h = [l for l in f if len(l)>=180]
             
-            # Indices
             idx_list = []
             if os.path.exists(p_ind) and p_ind.strip() != "":
                 with open(p_ind, 'r', encoding='cp1252') as f:
@@ -160,10 +155,7 @@ class FrmPrincipal(ctk.CTkFrame):
                             except: pass
             dt_lim = idx_list[-1][0] if idx_list else datetime.datetime.now()
 
-            # Detail
-            print(f"Lendo Detail: {p_det}")
             with open(p_det, 'r', encoding='cp1252') as f: lines_d_raw = f.readlines()
-            
             map_d = defaultdict(list)
             lines_d_valid = []
             for l in lines_d_raw:
@@ -172,22 +164,20 @@ class FrmPrincipal(ctk.CTkFrame):
                     map_d[l[:12].strip()+l[12:21].strip()].append(l)
             del lines_d_raw
 
-            # ACCESS
+            # --- CORREÇÃO DOS TEMPLATES PARA O EXECUTÁVEL ---
             self.master.after(0, lambda: self.lbl_status.configure(text="Gerando Access..."))
-            base_dir = os.getcwd()
-            p_tpl_xls = os.path.join(base_dir, "Templates", "XLS-Matriz.xlsx")
-            p_tpl_mdb = os.path.join(base_dir, "Templates", "MDB-Matriz.mdb")
+            
+            # Usamos resource_path para que o programa busque DENTRO do EXE
+            p_tpl_xls = resource_path(os.path.join("Templates", "XLS-Matriz.xlsx"))
+            p_tpl_mdb = resource_path(os.path.join("Templates", "MDB-Matriz.mdb"))
             
             if not os.path.exists(p_tpl_mdb): raise Exception(f"Template MDB não achado: {p_tpl_mdb}")
 
             ok, msg = gerar_mdb_access(lines_h, lines_d_valid, p_out, self.rotina_selecionada, p_tpl_mdb)
             if not ok: 
-                print(f"Erro Access: {msg}")
                 self.master.after(0, lambda m=msg: messagebox.showwarning("Aviso Access", m))
 
-            # EXCEL
             self.master.after(0, lambda: self.lbl_status.configure(text="Processando Excel..."))
-            
             if not os.path.exists(p_tpl_xls): raise Exception(f"Template XLS não achado: {p_tpl_xls}")
             tpl_info = extrair_info_template(p_tpl_xls)
             
@@ -197,8 +187,6 @@ class FrmPrincipal(ctk.CTkFrame):
                 tasks.append((l, p_tpl_xls, p_out, self.rotina_selecionada, idx_list, map_d.get(k, []), dt_lim, tpl_info))
 
             tot = len(tasks)
-            print(f"Iniciando Multiprocessamento de {tot} arquivos...")
-            
             done = 0
             errs = []
             
@@ -215,28 +203,18 @@ class FrmPrincipal(ctk.CTkFrame):
                     if "ERRO" in res: errs.append(res)
                     self.master.after(0, lambda v=done, t=tot: update_progress(v, t))
 
-            # --- 2. CALCULA O TEMPO FINAL ---
             tempo_fim = datetime.datetime.now()
             tempo_total = tempo_fim - tempo_inicio
-            
-            # Formata para ficar bonito (tira os milissegundos extras)
             tempo_str = str(tempo_total).split('.')[0] 
 
             msg = f"Processo Finalizado!\n\nTempo Total: {tempo_str}\nSucesso: {tot-len(errs)}\nErros: {len(errs)}"
             if errs: msg += "\n" + "\n".join(errs[:5])
             
-            print(f"Concluído em {tempo_str}")
             self.master.after(0, lambda m=msg: messagebox.showinfo("Fim", m))
             self.master.after(0, lambda: self.lbl_status.configure(text=f"Concluído em {tempo_str}"))
 
         except Exception as e:
-            print(f"ERRO FATAL: {e}")
             self.master.after(0, lambda erro=str(e): messagebox.showerror("Erro", f"Ocorreu um erro:\n{erro}"))
             self.master.after(0, lambda: self.lbl_status.configure(text="Erro!"))
         finally:
             self.master.after(0, lambda: self.btn_run.configure(state="normal", text="PROCESSAR TUDO"))
-
-    def _upd(self, v, t):
-        p = v / t
-        self.pb.set(p)
-        self.lbl_status.configure(text=f"Excel: {v}/{t} ({int(p*100)}%)")

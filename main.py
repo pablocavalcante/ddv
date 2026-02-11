@@ -22,10 +22,7 @@ if __name__ == "__main__":
     root.title("DDV")
     
     centralizar_janela(root, 400, 300)
-    
-    # Passamos 'root' junto com a função usando lambda para ficar elegante
-    # Ou altere no interface.py para passar apenas a rotina e a função pegar o root global
-    # Mas a forma mais simples sem mexer no interface.py é:
+
     
     def callback_bridge(rotina):
         iniciar_app_principal(root, rotina)

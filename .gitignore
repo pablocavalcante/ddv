@@ -1,0 +1,11 @@
+# Arquivos de sistema e Python
+__pycache__/
+*.pyc
+.DS_Store
+
+# Arquivos de dados reais
+*.txt
+*.csv
+
+venv/
+.env

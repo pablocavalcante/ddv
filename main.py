@@ -1,6 +1,8 @@
+import os
+import sys
 import multiprocessing
 import customtkinter as ctk
-from interface import FrmSelecaoRotina, FrmPrincipal
+from interface import FrmSelecaoRotina, FrmPrincipal, resource_path
 
 # --- FUNÇÃO AUXILIAR PARA CENTRALIZAR ---
 def centralizar_janela(janela, largura, altura):
@@ -20,6 +22,13 @@ if __name__ == "__main__":
     
     root = ctk.CTk()
     root.title("DDV")
+    
+    # Configurar o ícone da janela
+    try:
+        icon_path = resource_path(os.path.join("icons", "msaccess.ico"))
+        root.iconbitmap(icon_path)
+    except Exception as e:
+        print(f"Aviso: Ícone não encontrado ({e})")
     
     centralizar_janela(root, 400, 300)
 

@@ -2,7 +2,7 @@
 echo Iniciando a criacao do executavel DDV...
 echo Aguarde, isso pode levar alguns minutos...
 
-pyinstaller --noconfirm --onefile --windowed --name "DDV" --add-data "icons;icons" --add-data "Templates;Templates" --icon "icons/msaccess.ico" main.py
+python -m PyInstaller --onefile --windowed --name "DDV" --add-data "icons;icons" --add-data "Templates;Templates" --icon "icons/msaccess.ico" main.py
 
 echo.
 echo ===========================================

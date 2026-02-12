@@ -5,18 +5,26 @@ from copy import copy
 from itertools import groupby
 import openpyxl
 
+# Constantes globais - evita recriar em cada execução
+CODIGOS_IPREM = frozenset({"5001", "6013", "6017", "7012", "PREV", "RPPS"})
+CODIGOS_HSPM = frozenset({"5101", "6015", "7011", "HSPM"})
+
 class TemplateInfo:
     def __init__(self):
         self.formulas_linha_modelo = {} 
         self.estilos_linha_modelo = {}  
         self.dados_footer = []          
 
+def _eh_formula(valor):
+    """Verifica se o valor é uma fórmula."""
+    return isinstance(valor, str) and "=" in valor
+
 def extrair_info_template(template_path):
     wb = openpyxl.load_workbook(template_path, data_only=False)
     ws = wb["Receitas"]
     info = TemplateInfo()
     
-    # 1. Linha Modelo (17)
+    # 1. Linha Modelo (17) - Simplificado
     for col in range(1, ws.max_column + 1):
         cell = ws.cell(row=17, column=col)
         info.estilos_linha_modelo[col] = {
@@ -25,27 +33,23 @@ def extrair_info_template(template_path):
             'border': copy(cell.border),
             'alignment': copy(cell.alignment),
         }
-        if isinstance(cell.value, str) and "=" in cell.value:
-            info.formulas_linha_modelo[col] = cell.value
-        else:
-            info.formulas_linha_modelo[col] = None
+        info.formulas_linha_modelo[col] = cell.value if _eh_formula(cell.value) else None
 
-    # 2. Footer
+    # 2. Footer - Otimizado
     start_footer = 18
     for r in range(start_footer, ws.max_row + 20): 
-        row_data = []
-        has_content = False
-        for c in range(1, ws.max_column + 1):
-            cell = ws.cell(row=r, column=c)
-            if cell.value: has_content = True
-            row_data.append({
-                'value': cell.value,
+        row_data = [
+            {
+                'value': (cell := ws.cell(row=r, column=c)).value,
                 'number_format': cell.number_format,
                 'font': copy(cell.font),
                 'border': copy(cell.border),
                 'alignment': copy(cell.alignment),
                 'fill': copy(cell.fill)
-            })
+            }
+            for c in range(1, ws.max_column + 1)
+        ]
+        has_content = any(item['value'] for item in row_data)
         if has_content or r <= ws.max_row: 
             info.dados_footer.append(row_data)
         else: break 
@@ -83,10 +87,7 @@ def processar_arquivo_isolado(args):
         ws["C7"] = proc
         ws["C8"] = f"{autor} - RF: {rf}"
 
-        # Detalhes
-        cod_iprem = {"5001", "6013", "6017", "7012", "PREV", "RPPS"}
-        cod_hspm = {"5101", "6015", "7011", "HSPM"}
-        
+        # Detalhes - Usa constantes congeladas (sem recriar)
         def sort_key(x): return x[23:27] + x[21:23]
         detalhes.sort(key=sort_key)
         
@@ -97,11 +98,10 @@ def processar_arquivo_isolado(args):
             g = list(group)
             t_venc = sum(float(l[86:96]) for l in g) / 100.0
             t_desc = sum(float(l[116:126]) for l in g) / 100.0
-            v_iprem = sum(float(l[116:126]) for l in g if l[27:31] in cod_iprem) / 100.0
-            v_hspm = sum(float(l[116:126]) for l in g if l[27:31] in cod_hspm) / 100.0
+            v_iprem = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_IPREM) / 100.0
+            v_hspm = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_HSPM) / 100.0
             
-            val_q = (t_venc - t_desc) + v_iprem + v_hspm
-            if padrao.startswith("PR") and val_q <= 0: val_q = 0
+            val_q = max(0, (t_venc - t_desc) + v_iprem + v_hspm) if padrao.startswith("PR") else (t_venc - t_desc) + v_iprem + v_hspm
 
             ano, mes = int(key[:4]), int(key[4:])
             nxt = datetime.datetime(ano, mes, 28) + datetime.timedelta(days=4)
@@ -113,47 +113,60 @@ def processar_arquivo_isolado(args):
         for d in rows_data:
             ws.cell(curr, 1, d['dt'])
             ws.cell(curr, 2, d['q'])
-            ws.cell(curr, 8, d['i'] if d['i']!=0 else 0)
-            ws.cell(curr, 10, d['h'] if d['h']!=0 else 0)
+            ws.cell(curr, 8, d['i'] or 0)  # Simplificado: 0 se falsy
+            ws.cell(curr, 10, d['h'] or 0)
 
             for col in range(1, ws.max_column + 1):
                 cell = ws.cell(curr, col)
                 st = tpl_info.estilos_linha_modelo.get(col)
                 fm = tpl_info.formulas_linha_modelo.get(col)
+                
+                # Aplicar estilo se existir
                 if st:
                     cell.number_format = st['number_format']
                     cell.font = st['font']
                     cell.border = st['border']
                     cell.alignment = st['alignment']
-                if fm: cell.value = fm.replace("17", str(curr))
-                if col == 3 and not fm: 
+                
+                # Aplicar fórmula ou VLOOKUP padrão
+                if fm:
+                    cell.value = fm.replace("17", str(curr))
+                elif col == 3:
                     cell.value = f"=VLOOKUP(A{curr},TOTINDICE!A:B,2,0)"
                     cell.number_format = '0.000000'
             curr += 1
 
-        # Footer
+        # Footer - Otimizado
         linha_fim_dados = curr - 1
         offset = curr - 18
+        
+        def processar_formula_footer(val, linha_fim, offset_val):
+            """Processa fórmulas do footer em um único lugar."""
+            if not _eh_formula(val):
+                return val
+            
+            vu = val.upper()
+            eh_soma = "SUM" in vu or "SOMA" in vu
+            
+            if eh_soma and ":" in vu:
+                m = re.search(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", vu)
+                if m and m.group(2) == "17":
+                    return f"=SUM({m.group(1)}17:{m.group(3)}{linha_fim})"
+            
+            if not (eh_soma and "17" in val):
+                def repl(m):
+                    c_row = int(m.group(2))
+                    return f"{m.group(1)}{c_row + offset_val}" if c_row >= 18 else m.group(0)
+                val = re.sub(r"([A-Z]+)(\d+)", repl, val)
+            
+            return val
+        
         for i, r_dat in enumerate(tpl_info.dados_footer):
             r_w = curr + i
             for j, c_dat in enumerate(r_dat):
                 col = j + 1
                 cell = ws.cell(r_w, col)
-                val = c_dat['value']
-                
-                if isinstance(val, str) and "=" in val:
-                    vu = val.upper()
-                    if ("SUM" in vu or "SOMA" in vu) and ":" in vu:
-                        m = re.search(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", vu)
-                        if m and m.group(2) == "17":
-                            val = f"=SUM({m.group(1)}17:{m.group(3)}{linha_fim_dados})"
-                    
-                    def repl(m):
-                        c_letra, c_row = m.group(1), int(m.group(2))
-                        return f"{c_letra}{c_row + offset}" if c_row >= 18 else m.group(0)
-                    
-                    if not (("SUM" in vu or "SOMA" in vu) and "17" in val):
-                        val = re.sub(r"([A-Z]+)(\d+)", repl, val)
+                val = processar_formula_footer(c_dat['value'], linha_fim_dados, offset)
                 
                 cell.value = val
                 cell.number_format = c_dat['number_format']

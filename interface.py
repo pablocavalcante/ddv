@@ -128,7 +128,37 @@ class FrmPrincipal(ctk.CTkFrame):
             entry_widget.delete(0, tk.END)
             entry_widget.insert(0, path)
 
-    def start(self): threading.Thread(target=self.run).start()
+    def start(self): 
+        threading.Thread(target=self.run).start()
+
+    def _carregar_indices(self, caminho_indice):
+        """Carrega arquivo de índices com tratamento de erros."""
+        if not (p_ind_stripped := caminho_indice.strip()) or not os.path.exists(p_ind_stripped):
+            return []
+        
+        indices = []
+        with open(p_ind_stripped, 'r', encoding='cp1252') as f:
+            for linha in f:
+                if len(linha) >= 8:
+                    try:
+                        dt = datetime.datetime.strptime(linha[:8], "%Y%m%d")
+                        val = float(linha[8:].replace(',', '.')) / 100.0
+                        indices.append((dt, val))
+                    except (ValueError, IndexError):
+                        pass
+        return indices
+
+    def _carregar_details(self, caminho_details):
+        """Carrega arquivo de detalhes e mapeia por processo."""
+        with open(caminho_details, 'r', encoding='cp1252') as f:
+            linhas = f.readlines()
+        
+        lines_validas = [l for l in linhas if len(l) >= 120]
+        mapa = defaultdict(list)
+        for l in lines_validas:
+            chave = l[:12].strip() + l[12:21].strip()
+            mapa[chave].append(l)
+        return lines_validas, mapa
 
     def run(self):
         try:
@@ -136,85 +166,89 @@ class FrmPrincipal(ctk.CTkFrame):
             self.master.after(0, lambda: self.btn_run.configure(state="disabled", text="PROCESSANDO..."))
             self.master.after(0, lambda: self.lbl_status.configure(text="Iniciando leitura..."))
             
+            # Validação de entrada (fail-fast)
             p_head = self.txt_header.get()
             p_det = self.txt_detail.get()
+            if not (p_head and p_det):
+                raise ValueError("Selecione os arquivos Header e Detail!")
+            
             p_ind = self.txt_indices.get()
             p_out = self.txt_output.get()
             
-            if not p_head or not p_det:
-                raise Exception("Selecione os arquivos Header e Detail!")
-
-            with open(p_head, 'r', encoding='cp1252') as f: lines_h = [l for l in f if len(l)>=180]
+            # Carregar arquivos
+            with open(p_head, 'r', encoding='cp1252') as f:
+                lines_h = [l for l in f if len(l) >= 180]
             
-            idx_list = []
-            if os.path.exists(p_ind) and p_ind.strip() != "":
-                with open(p_ind, 'r', encoding='cp1252') as f:
-                    for l in f:
-                        if len(l)>=8:
-                            try: idx_list.append((datetime.datetime.strptime(l[:8], "%Y%m%d"), float(l[8:].replace(',', '.'))/100.0))
-                            except: pass
+            idx_list = self._carregar_indices(p_ind)
             dt_lim = idx_list[-1][0] if idx_list else datetime.datetime.now()
+            
+            lines_d_valid, map_d = self._carregar_details(p_det)
 
-            with open(p_det, 'r', encoding='cp1252') as f: lines_d_raw = f.readlines()
-            map_d = defaultdict(list)
-            lines_d_valid = []
-            for l in lines_d_raw:
-                if len(l)>=120:
-                    lines_d_valid.append(l)
-                    map_d[l[:12].strip()+l[12:21].strip()].append(l)
-            del lines_d_raw
-
-            # --- CORREÇÃO DOS TEMPLATES PARA O EXECUTÁVEL ---
+            # --- PROCESSAMENTO DE TEMPLATES ---
             self.master.after(0, lambda: self.lbl_status.configure(text="Gerando Access..."))
             
-            # Usamos resource_path para que o programa busque DENTRO do EXE
             p_tpl_xls = resource_path(os.path.join("Templates", "XLS-Matriz.xlsx"))
             p_tpl_mdb = resource_path(os.path.join("Templates", "MDB-Matriz.mdb"))
             
-            if not os.path.exists(p_tpl_mdb): raise Exception(f"Template MDB não achado: {p_tpl_mdb}")
+            # Validar templates
+            for tpl_path, tpl_name in [(p_tpl_mdb, "MDB"), (p_tpl_xls, "XLS")]:
+                if not os.path.exists(tpl_path):
+                    raise FileNotFoundError(f"Template {tpl_name} não encontrado: {tpl_path}")
 
             ok, msg = gerar_mdb_access(lines_h, lines_d_valid, p_out, self.rotina_selecionada, p_tpl_mdb)
             if not ok: 
                 self.master.after(0, lambda m=msg: messagebox.showwarning("Aviso Access", m))
 
             self.master.after(0, lambda: self.lbl_status.configure(text="Processando Excel..."))
-            if not os.path.exists(p_tpl_xls): raise Exception(f"Template XLS não achado: {p_tpl_xls}")
             tpl_info = extrair_info_template(p_tpl_xls)
             
-            tasks = []
-            for l in lines_h:
-                k = l[:12].strip() + l[12:21].strip()
-                tasks.append((l, p_tpl_xls, p_out, self.rotina_selecionada, idx_list, map_d.get(k, []), dt_lim, tpl_info))
+            # Construir tarefas de processamento
+            tasks = [
+                (l, p_tpl_xls, p_out, self.rotina_selecionada, idx_list, map_d.get(l[:12].strip() + l[12:21].strip(), []), dt_lim, tpl_info)
+                for l in lines_h
+            ]
 
             tot = len(tasks)
             done = 0
             errs = []
             
             def update_progress(val, total):
-                 p = val / total
-                 self.pb.set(p)
-                 self.lbl_status.configure(text=f"Excel: {val}/{total} ({int(p*100)}%)")
+                p = val / total
+                self.pb.set(p)
+                self.lbl_status.configure(text=f"Excel: {val}/{total} ({int(p*100)}%)")
 
             with concurrent.futures.ProcessPoolExecutor(max_workers=max(1, multiprocessing.cpu_count()-1)) as exe:
                 futs = {exe.submit(processar_arquivo_isolado, t): t for t in tasks}
                 for f in concurrent.futures.as_completed(futs):
                     res = f.result()
                     done += 1
-                    if "ERRO" in res: errs.append(res)
+                    if "ERRO" in res:
+                        errs.append(res)
                     self.master.after(0, lambda v=done, t=tot: update_progress(v, t))
 
+            # Gerar relatório final
             tempo_fim = datetime.datetime.now()
             tempo_total = tempo_fim - tempo_inicio
             tempo_str = str(tempo_total).split('.')[0] 
 
-            msg = f"Processo Finalizado!\n\nTempo Total: {tempo_str}\nSucesso: {tot-len(errs)}\nErros: {len(errs)}"
-            if errs: msg += "\n" + "\n".join(errs[:5])
+            msg_linhas = [
+                f"Processo Finalizado!\n\nTempo Total: {tempo_str}",
+                f"Sucesso: {tot - len(errs)}",
+                f"Erros: {len(errs)}"
+            ]
+            if errs:
+                msg_linhas.append("\nPrimeiras 5 falhas:")
+                msg_linhas.extend(errs[:5])
             
+            msg = "\n".join(msg_linhas)
             self.master.after(0, lambda m=msg: messagebox.showinfo("Fim", m))
             self.master.after(0, lambda: self.lbl_status.configure(text=f"Concluído em {tempo_str}"))
 
-        except Exception as e:
+        except (FileNotFoundError, ValueError) as e:
             self.master.after(0, lambda erro=str(e): messagebox.showerror("Erro", f"Ocorreu um erro:\n{erro}"))
+            self.master.after(0, lambda: self.lbl_status.configure(text="Erro!"))
+        except Exception as e:
+            self.master.after(0, lambda erro=str(e): messagebox.showerror("Erro (Inesperado)", f"Erro inesperado:\n{erro}"))
             self.master.after(0, lambda: self.lbl_status.configure(text="Erro!"))
         finally:
             self.master.after(0, lambda: self.btn_run.configure(state="normal", text="PROCESSAR TUDO"))

@@ -62,7 +62,7 @@ def processar_arquivo_isolado(args):
 
         nome_arq = f"{rotina}_{proc}-{rf}.xlsx"
         day_folder = os.path.join(output_folder, datetime.datetime.now().strftime("%Y-%m-%d"))
-        p_folder = os.path.join(day_folder, f"Processo_{proc} - CD 1")
+        p_folder = os.path.join(day_folder, f"Processo_{proc} - CD1")
         os.makedirs(p_folder, exist_ok=True)
         path = os.path.join(p_folder, nome_arq)
 

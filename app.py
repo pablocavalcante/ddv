@@ -10,8 +10,8 @@ import multiprocessing
 
 import streamlit as st
 
-from service_access import gerar_mdb_access
-from service_excel import extrair_info_template, processar_arquivo_isolado
+from access import gerar_mdb_access
+from excel import extrair_info_template, processar_arquivo_isolado
 
 # Suprimir avisos inofensivos
 warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")

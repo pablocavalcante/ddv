@@ -14,7 +14,7 @@ def gerar_mdb_access(header_lines, detail_lines_raw, output_folder, rotina, temp
     """
     Popula o MDB Matriz com os dados lidos do TXT.
     """
-    nome_mdb = f"{rotina}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.mdb"
+    nome_mdb = f"{rotina}_{header_lines[0][0:12].strip()}_{header_lines[0][12:21].strip()}.mdb"
     caminho_final = os.path.join(output_folder, nome_mdb)
     
     try:

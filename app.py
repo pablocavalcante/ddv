@@ -257,7 +257,7 @@ if btn_processar:
                             if len(linha) >= 8:
                                 try:
                                     dt = datetime.datetime.strptime(linha[:8], "%Y%m%d")
-                                    val = float(linha[8:].replace(',', '.')) / 100.0
+                                    val = float(linha[8:].replace(',', '.'))
                                     idx_list.append((dt, val))
                                 except (ValueError, IndexError):
                                     pass

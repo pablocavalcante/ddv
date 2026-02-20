@@ -1,7 +1,6 @@
 import os
 import datetime
 import re
-from copy import copy
 from itertools import groupby
 import openpyxl
 
@@ -19,45 +18,43 @@ def _eh_formula(valor):
     """Verifica se o valor é uma fórmula."""
     return isinstance(valor, str) and "=" in valor
 
-def extrair_info_template(template_path):
-    wb = openpyxl.load_workbook(template_path, data_only=False)
+def extrair_info_template(wb):
+    """
+    Extrai as informações de estilo baseadas no ID interno do openpyxl (_style).
+    Recebe o workbook (wb) já aberto para não ler o disco duas vezes.
+    """
     ws = wb["Receitas"]
     info = TemplateInfo()
     
-    # 1. Linha Modelo (17) - Simplificado
+    # 1. Linha Modelo (17) - Extremamente Simplificado e Rápido
     for col in range(1, ws.max_column + 1):
         cell = ws.cell(row=17, column=col)
-        info.estilos_linha_modelo[col] = {
-            'number_format': cell.number_format,
-            'font': copy(cell.font),
-            'border': copy(cell.border),
-            'alignment': copy(cell.alignment),
-        }
+        # OTIMIZAÇÃO: Copia apenas o ID numérico do estilo. Evita cópias pesadas de memória.
+        info.estilos_linha_modelo[col] = cell._style
         info.formulas_linha_modelo[col] = cell.value if _eh_formula(cell.value) else None
 
     # 2. Footer - Otimizado
     start_footer = 18
     for r in range(start_footer, ws.max_row + 20): 
-        row_data = [
-            {
-                'value': (cell := ws.cell(row=r, column=c)).value,
-                'number_format': cell.number_format,
-                'font': copy(cell.font),
-                'border': copy(cell.border),
-                'alignment': copy(cell.alignment),
-                'fill': copy(cell.fill)
-            }
-            for c in range(1, ws.max_column + 1)
-        ]
+        row_data = []
+        for c in range(1, ws.max_column + 1):
+            cell = ws.cell(row=r, column=c)
+            row_data.append({
+                'value': cell.value,
+                '_style': cell._style # OTIMIZAÇÃO
+            })
+            
         has_content = any(item['value'] for item in row_data)
         if has_content or r <= ws.max_row: 
             info.dados_footer.append(row_data)
-        else: break 
-    wb.close()
+        else: 
+            break 
+            
     return info
 
 def processar_arquivo_isolado(args):
-    (line_h, template_path, output_folder, rotina, indices, detalhes, dt_limite, tpl_info) = args
+    # OTIMIZAÇÃO: Não recebe o tpl_info via argumento. Acabaram-se os gargalos do Pickling!
+    (line_h, template_path, output_folder, rotina, indices, detalhes, dt_limite) = args
     try:
         proc = line_h[0:12].strip()
         rf = line_h[12:21].strip()
@@ -70,7 +67,12 @@ def processar_arquivo_isolado(args):
         os.makedirs(p_folder, exist_ok=True)
         path = os.path.join(p_folder, nome_arq)
 
+        # O trabalhador (processo) abre o ficheiro uma única vez de forma independente
         wb = openpyxl.load_workbook(template_path)
+        
+        # Lê a informação do template usando o ficheiro que acabou de abrir
+        tpl_info = extrair_info_template(wb)
+        
         ws = wb["Receitas"]
         ws_idx = wb["TOTINDICE"]
 
@@ -87,7 +89,7 @@ def processar_arquivo_isolado(args):
         ws["C7"] = proc
         ws["C8"] = f"{autor} - RF: {rf}"
 
-        # Detalhes - Usa constantes congeladas (sem recriar)
+        # Detalhes - Usa constantes congeladas
         def sort_key(x): return x[23:27] + x[21:23]
         detalhes.sort(key=sort_key)
         
@@ -113,30 +115,27 @@ def processar_arquivo_isolado(args):
         for d in rows_data:
             ws.cell(curr, 1, d['dt'])
             ws.cell(curr, 2, d['q'])
-            ws.cell(curr, 8, d['i'] or 0)  # Simplificado: 0 se falsy
+            ws.cell(curr, 8, d['i'] or 0)  
             ws.cell(curr, 10, d['h'] or 0)
 
             for col in range(1, ws.max_column + 1):
                 cell = ws.cell(curr, col)
-                st = tpl_info.estilos_linha_modelo.get(col)
+                st_id = tpl_info.estilos_linha_modelo.get(col)
                 fm = tpl_info.formulas_linha_modelo.get(col)
                 
-                # Aplicar estilo se existir
-                if st:
-                    cell.number_format = st['number_format']
-                    cell.font = st['font']
-                    cell.border = st['border']
-                    cell.alignment = st['alignment']
+                # APLICAÇÃO DE ESTILO RELÂMPAGO
+                if st_id is not None:
+                    cell._style = st_id
                 
                 # Aplicar fórmula ou VLOOKUP padrão
                 if fm:
                     cell.value = fm.replace("17", str(curr))
                 elif col == 3:
                     cell.value = f"=VLOOKUP(A{curr},TOTINDICE!A:B,2,0)"
-                    cell.number_format = '0.000000'
+                    cell.number_format = '0.000000' # Garante formatação apenas na formula dinâmica
             curr += 1
 
-        # Footer - Otimizado
+        # Footer
         linha_fim_dados = curr - 1
         offset = curr - 18
         
@@ -169,16 +168,15 @@ def processar_arquivo_isolado(args):
                 val = processar_formula_footer(c_dat['value'], linha_fim_dados, offset)
                 
                 cell.value = val
-                cell.number_format = c_dat['number_format']
-                cell.font = c_dat['font']
-                cell.border = c_dat['border']
-                cell.alignment = c_dat['alignment']
-                cell.fill = c_dat['fill']
+                # APLICAÇÃO DE ESTILO RELÂMPAGO NO FOOTER
+                if c_dat['_style'] is not None:
+                    cell._style = c_dat['_style']
 
         ws["C10"] = last_dt if last_dt else dt_limite
         ws["C10"].number_format = 'dd/mmm/yy'
         wb.save(path)
         wb.close()
         return nome_arq
+        
     except Exception as e:
         return f"ERRO: {proc} - {str(e)}"

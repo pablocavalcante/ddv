@@ -115,6 +115,7 @@ def processar_arquivo_isolado(args):
         for d in rows_data:
             ws.cell(curr, 1, d['dt'])
             ws.cell(curr, 2, d['q'])
+            ws.cell(curr, 5, 0)
             ws.cell(curr, 8, d['i'] or 0)  
             ws.cell(curr, 10, d['h'] or 0)
 
@@ -131,7 +132,7 @@ def processar_arquivo_isolado(args):
                 if fm:
                     cell.value = fm.replace("17", str(curr))
                 elif col == 3:
-                    cell.value = f"=VLOOKUP(A{curr},TOTINDICE!A:B,2,0)"
+                    cell.value = f'=IFERROR(VLOOKUP(A{curr},TOTINDICE!A:B,2,0), "")'
                     cell.number_format = '0.000000' # Garante formatação apenas na formula dinâmica
             curr += 1
 
@@ -140,25 +141,34 @@ def processar_arquivo_isolado(args):
         offset = curr - 18
         
         def processar_formula_footer(val, linha_fim, offset_val):
-            """Processa fórmulas do footer em um único lugar."""
+            """Atualiza as fórmulas do rodapé usando Cláusulas de Guarda (Early Return)."""
+            
+            # 1. Cláusula de Guarda: Se não for fórmula, devolve como está e encerra.
             if not _eh_formula(val):
                 return val
-            
+                
             vu = val.upper()
-            eh_soma = "SUM" in vu or "SOMA" in vu
             
-            if eh_soma and ":" in vu:
-                m = re.search(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", vu)
-                if m and m.group(2) == "17":
-                    return f"=SUM({m.group(1)}17:{m.group(3)}{linha_fim})"
+            # 2. Tratamento Direto: Somas dos totais (Ex: =SUM(B17:B20))
+            if ("SUM" in vu or "SOMA" in vu) and ":" in vu:
+                m = re.search(r"([A-Z]+)17:([A-Z]+)(\d+)", vu)
+                if m:
+                    # Achou a soma principal? Reescreve e já sai da função!
+                    return f"=SUM({m.group(1)}17:{m.group(2)}{linha_fim})"
+
+            # 3. Caso Geral: Tratamento das outras fórmulas da margem/rodapé
+            def deslocar_linha(m):
+                linha_atual = int(m.group(2))
+                return f"{m.group(1)}{linha_atual + offset_val}" if linha_atual >= 18 else m.group(0)
+                
+            # Atualiza os números das linhas para empurrar o rodapé para baixo
+            nova_formula = re.sub(r"([A-Z]+)(\d+)", deslocar_linha, val)
             
-            if not (eh_soma and "17" in val):
-                def repl(m):
-                    c_row = int(m.group(2))
-                    return f"{m.group(1)}{c_row + offset_val}" if c_row >= 18 else m.group(0)
-                val = re.sub(r"([A-Z]+)(\d+)", repl, val)
-            
-            return val
+            # 4. Escudo Final: Aplica o IFERROR caso ainda não tenha
+            if "IFERROR" not in vu and "SEERRO" not in vu:
+                return f'=IFERROR({nova_formula[1:]}, "")'
+                
+            return nova_formula
         
         for i, r_dat in enumerate(tpl_info.dados_footer):
             r_w = curr + i

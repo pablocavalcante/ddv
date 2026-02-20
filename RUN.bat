@@ -27,6 +27,12 @@ IF NOT EXIST "venv\Scripts\activate.bat" (
 
 echo Iniciando o aplicativo no navegador...
 echo ===================================================
+
+:: --- NOVIDADE AQUI ---
+:: Configura o Streamlit para NÃO pedir e-mail e NÃO coletar dados do usuário
+set STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+set STREAMLIT_GLOBAL_SHOW_EMAIL_PROMPT=false
+
 streamlit run app.py --logger.level=warning
 
 pause

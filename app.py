@@ -203,7 +203,7 @@ st.markdown("## ⚙️ Etapa 2: Processamento")
  
 is_valid = file_header is not None and file_detail is not None
 if not is_valid:
-    st.warning("⚠️ Você precisa selecionar ao menos os arquivos Header e Detail para continuar.")
+    st.warning("⚠️ Você precisa selecionar ao menos os arquivos Header e Detail para avançar.")
  
 col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
  

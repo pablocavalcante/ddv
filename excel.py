@@ -17,11 +17,7 @@ class TemplateInfo:
 def _eh_formula(valor):
     """Verifica se o valor é uma fórmula."""
     return isinstance(valor, str) and "=" in valor
-<<<<<<< HEAD
  
-=======
-
->>>>>>> 3c38a46a8546e8eac0e320fc4129457d3cb0632f
 def extrair_info_template(wb):
     """
     Extrai as informações de estilo baseadas no ID interno do openpyxl (_style).
@@ -70,11 +66,7 @@ def processar_arquivo_isolado(args):
         p_folder = os.path.join(day_folder, f"Processo_{proc} - CD 1")
         os.makedirs(p_folder, exist_ok=True)
         path = os.path.join(p_folder, nome_arq)
-<<<<<<< HEAD
  
-=======
-
->>>>>>> 3c38a46a8546e8eac0e320fc4129457d3cb0632f
         # O trabalhador (processo) abre o ficheiro uma única vez de forma independente
         wb = openpyxl.load_workbook(template_path)
         
@@ -96,11 +88,7 @@ def processar_arquivo_isolado(args):
  
         ws["C7"] = proc
         ws["C8"] = f"{autor} - RF: {rf}"
-<<<<<<< HEAD
  
-=======
-
->>>>>>> 3c38a46a8546e8eac0e320fc4129457d3cb0632f
         # Detalhes - Usa constantes congeladas
         def sort_key(x): return x[23:27] + x[21:23]
         detalhes.sort(key=sort_key)
@@ -127,10 +115,6 @@ def processar_arquivo_isolado(args):
         for d in rows_data:
             ws.cell(curr, 1, d['dt'])
             ws.cell(curr, 2, d['q'])
-<<<<<<< HEAD
-=======
-            ws.cell(curr, 5, 0)
->>>>>>> 3c38a46a8546e8eac0e320fc4129457d3cb0632f
             ws.cell(curr, 8, d['i'] or 0)  
             ws.cell(curr, 10, d['h'] or 0)
  
@@ -147,50 +131,34 @@ def processar_arquivo_isolado(args):
                 if fm:
                     cell.value = fm.replace("17", str(curr))
                 elif col == 3:
-<<<<<<< HEAD
                     cell.value = f"=VLOOKUP(A{curr},TOTINDICE!A:B,2,0)"
                     cell.number_format = '0.000000' # Garante formatação apenas na formula dinâmica
             curr += 1
  
-=======
-                    cell.value = f'=IFERROR(VLOOKUP(A{curr},TOTINDICE!A:B,2,0), "")'
-                    cell.number_format = '0.000000' # Garante formatação apenas na formula dinâmica
-            curr += 1
-
->>>>>>> 3c38a46a8546e8eac0e320fc4129457d3cb0632f
         # Footer
         linha_fim_dados = curr - 1
         offset = curr - 18
         
         def processar_formula_footer(val, linha_fim, offset_val):
-            """Atualiza as fórmulas do rodapé usando Cláusulas de Guarda (Early Return)."""
-            
-            # 1. Cláusula de Guarda: Se não for fórmula, devolve como está e encerra.
+            """Processa fórmulas do footer em um único lugar."""
             if not _eh_formula(val):
                 return val
-                
+            
             vu = val.upper()
+            eh_soma = "SUM" in vu or "SOMA" in vu
             
-            # 2. Tratamento Direto: Somas dos totais (Ex: =SUM(B17:B20))
-            if ("SUM" in vu or "SOMA" in vu) and ":" in vu:
-                m = re.search(r"([A-Z]+)17:([A-Z]+)(\d+)", vu)
-                if m:
-                    # Achou a soma principal? Reescreve e já sai da função!
-                    return f"=SUM({m.group(1)}17:{m.group(2)}{linha_fim})"
-
-            # 3. Caso Geral: Tratamento das outras fórmulas da margem/rodapé
-            def deslocar_linha(m):
-                linha_atual = int(m.group(2))
-                return f"{m.group(1)}{linha_atual + offset_val}" if linha_atual >= 18 else m.group(0)
-                
-            # Atualiza os números das linhas para empurrar o rodapé para baixo
-            nova_formula = re.sub(r"([A-Z]+)(\d+)", deslocar_linha, val)
+            if eh_soma and ":" in vu:
+                m = re.search(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", vu)
+                if m and m.group(2) == "17":
+                    return f"=SUM({m.group(1)}17:{m.group(3)}{linha_fim})"
             
-            # 4. Escudo Final: Aplica o IFERROR caso ainda não tenha
-            if "IFERROR" not in vu and "SEERRO" not in vu:
-                return f'=IFERROR({nova_formula[1:]}, "")'
-                
-            return nova_formula
+            if not (eh_soma and "17" in val):
+                def repl(m):
+                    c_row = int(m.group(2))
+                    return f"{m.group(1)}{c_row + offset_val}" if c_row >= 18 else m.group(0)
+                val = re.sub(r"([A-Z]+)(\d+)", repl, val)
+            
+            return val
         
         for i, r_dat in enumerate(tpl_info.dados_footer):
             r_w = curr + i
@@ -203,11 +171,7 @@ def processar_arquivo_isolado(args):
                 # APLICAÇÃO DE ESTILO RELÂMPAGO NO FOOTER
                 if c_dat['_style'] is not None:
                     cell._style = c_dat['_style']
-<<<<<<< HEAD
  
-=======
-
->>>>>>> 3c38a46a8546e8eac0e320fc4129457d3cb0632f
         ws["C10"] = last_dt if last_dt else dt_limite
         ws["C10"].number_format = 'dd/mmm/yy'
         wb.save(path)

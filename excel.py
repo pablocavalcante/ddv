@@ -4,9 +4,9 @@ import re
 from itertools import groupby
 import openpyxl
 
-# Constantes globais - evita recriar em cada execução
-CODIGOS_IPREM = frozenset({"5001", "6013", "6017", "7012", "PREV", "RPPS"})
-CODIGOS_HSPM = frozenset({"5101", "6015", "7011", "HSPM"})
+# Constantes globais - atualizadas para a lógica de 2019 (Sem o 7011 e 7012)
+CODIGOS_IPREM = frozenset({"5001", "6013", "6017", "PREV", "RPPS"})
+CODIGOS_HSPM = frozenset({"5101", "6015", "HSPM"})
 
 class TemplateInfo:
     def __init__(self):
@@ -100,24 +100,45 @@ def processar_arquivo_isolado(args):
             g = list(group)
             t_venc = sum(float(l[86:96]) for l in g) / 100.0
             t_desc = sum(float(l[116:126]) for l in g) / 100.0
-            v_iprem = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_IPREM) / 100.0
-            v_hspm = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_HSPM) / 100.0
             
-            val_q = max(0, (t_venc - t_desc) + v_iprem + v_hspm) if padrao.startswith("PR") else (t_venc - t_desc) + v_iprem + v_hspm
+            # O IPREM e HSPM só recebem o 7011/7012 se o ano for MENOR que 2019
+            v_iprem = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_IPREM or (l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) < 2019)) / 100.0
+            v_hspm = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_HSPM or (l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) < 2019)) / 100.0
+            
+            # O FUNFIN e FUNPREV assumem a identidade do 7011/7012 de 2019 em diante
+            v_funfin = sum(float(l[116:126]) for l in g if l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) >= 2019) / 100.0
+            v_funprev = sum(float(l[116:126]) for l in g if l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) >= 2019) / 100.0
+
+            # A Conta de Quantidade SÓ soma IPREM e HSPM. Assim, o FUNFIN fica de fora a partir de 2019!
+            val_q = (t_venc - t_desc) + v_iprem + v_hspm
+            
+            # val_q = max(0, (t_venc - t_desc) + v_iprem + v_hspm) if padrao.startswith("PR") else (t_venc - t_desc) + v_iprem + v_hspm
 
             ano, mes = int(key[:4]), int(key[4:])
             nxt = datetime.datetime(ano, mes, 28) + datetime.timedelta(days=4)
             last_dt = nxt - datetime.timedelta(days=nxt.day)
 
-            rows_data.append({'dt': last_dt, 'q': val_q, 'i': v_iprem, 'h': v_hspm})
+            # Adicionando na lista usando last_dt
+            rows_data.append({
+                'dt': last_dt,  
+                'q': val_q,
+                'iprem': v_iprem,
+                'hspm': v_hspm,
+                'funfin': v_funfin,
+                'funprev': v_funprev
+            })
 
         curr = 17
         for d in rows_data:
             ws.cell(curr, 1, d['dt'])
             ws.cell(curr, 2, d['q'])
             ws.cell(curr, 5, 0)
-            ws.cell(curr, 8, d['i'] or 0)  
-            ws.cell(curr, 10, d['h'] or 0)
+            
+            # Puxamos de dentro do 'd'!
+            ws.cell(curr, 8, d.get('iprem', 0) or None)
+            ws.cell(curr, 10, d.get('hspm', 0) or None)
+            ws.cell(curr, 13, d.get('funfin', 0) or None)  # Coluna M
+            ws.cell(curr, 14, d.get('funprev', 0) or None) # Coluna N
 
             for col in range(1, ws.max_column + 1):
                 cell = ws.cell(curr, col)

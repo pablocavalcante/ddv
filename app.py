@@ -9,21 +9,21 @@ from pathlib import Path
 import concurrent.futures
 import multiprocessing
 from collections import defaultdict
- 
+
 import streamlit as st
- 
+
 from access import gerar_mdb_access
 # IMPORTANTE: extrair_info_template foi removido daqui pois agora vive dentro do trabalhador
 from excel import processar_arquivo_isolado
- 
+
 # Omissão de avisos não críticos gerados por reexecuções dinâmicas do Streamlit
 warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
 warnings.filterwarnings("ignore", message=".*Process.*finalized.*")
- 
+
 # Força o método de inicialização 'spawn' no Windows para evitar travamentos de concorrência
 if sys.platform == "win32":
     multiprocessing.set_start_method("spawn", force=True)
- 
+
 # --- Utilitários ---
 def resource_path(relative_path):
     try:
@@ -31,7 +31,7 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
- 
+
 def get_base64_image(image_path):
     caminho_completo = resource_path(image_path)
     if not os.path.exists(caminho_completo):
@@ -41,7 +41,7 @@ def get_base64_image(image_path):
             return base64.b64encode(img_file.read()).decode()
     except Exception:
         return ""
- 
+
 def abrir_explorador(caminho):
     try:
         if sys.platform == "win32":
@@ -54,7 +54,7 @@ def abrir_explorador(caminho):
     except Exception as e:
         st.error(f"Falha na integração com o SO: {str(e)}")
         return False
- 
+
 def selecionar_pasta_windows(pasta_inicial=None):
     try:
         import tkinter as tk
@@ -81,19 +81,19 @@ def selecionar_pasta_windows(pasta_inicial=None):
     except Exception as e:
         st.error(f"Erro de renderização do Tkinter: {str(e)}")
         return None
- 
+
 # --- Callbacks de UI ---
 def on_browse_click():
     pasta_selecionada = selecionar_pasta_windows(st.session_state.dir_saida)
     if pasta_selecionada:
         st.session_state.dir_saida = pasta_selecionada
- 
+
 def limpar_tudo():
     st.session_state.uploader_key += 1
     st.session_state.resultado_processamento = None
     st.session_state.dir_saida = ""
     st.session_state.processando = False
- 
+
 # --- Configuração Base de UI ---
 st.set_page_config(
     page_title="DDV",
@@ -101,10 +101,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
- 
+
 b64_access = get_base64_image(os.path.join("icons", "msaccess.jpg"))
 b64_file_open = get_base64_image(os.path.join("icons", "file_open.png"))
- 
+
 custom_css = """
 <style>
     #MainMenu {visibility: hidden;}
@@ -121,7 +121,7 @@ custom_css = """
     [data-testid="stFileUploadDropzone"] > div > div::before, [data-testid="stFileUploaderDropzone"] > div > div::before { content: "Arraste e solte o arquivo aqui" !important; color: #31333F !important; font-size: 16px !important; font-weight: 500 !important; display: block !important; margin-bottom: 5px !important; }
     [data-testid="stFileUploadDropzone"] > div > div::after, [data-testid="stFileUploaderDropzone"] > div > div::after { content: "Limite de 500MB por arquivo • TXT" !important; color: #888 !important; font-size: 14px !important; display: block !important; }
 """
- 
+
 if b64_file_open:
     custom_css += f"""
     [data-testid="stFileUploadDropzone"] button p, [data-testid="stFileUploaderDropzone"] button p {{ display: none !important; }}
@@ -129,52 +129,52 @@ if b64_file_open:
     """
 custom_css += "</style>"
 st.markdown(custom_css, unsafe_allow_html=True)
- 
+
 # --- Gerenciamento de Estado da Sessão ---
 if "rotina_selecionada" not in st.session_state: st.session_state.rotina_selecionada = "SJ230133"
 if "processando" not in st.session_state: st.session_state.processando = False
 if "resultado_processamento" not in st.session_state: st.session_state.resultado_processamento = None
 if "dir_saida" not in st.session_state: st.session_state.dir_saida = ""
 if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
- 
+
 # --- Renderização Sidebar ---
 st.sidebar.markdown("## ⚙️ Configuração")
-rotinas_disponiveis = ["SJ230133", "SJ071930", "SJ071984"]
+rotinas_disponiveis = ["SJ230133", "SJ071984"]
 st.session_state.rotina_selecionada = st.sidebar.selectbox(
     "Selecione a Rotina:",
     options=rotinas_disponiveis,
     index=rotinas_disponiveis.index(st.session_state.rotina_selecionada)
 )
- 
+
 # --- Renderização Principal ---
 if b64_access:
     st.markdown(f'<div class="main-title"><img src="data:image/jpeg;base64,{b64_access}" width="40"> DDV </div>', unsafe_allow_html=True)
 else:
     st.markdown('<div class="main-title">📊 DDV </div>', unsafe_allow_html=True)
- 
+
 st.markdown('<div class="subtitle">Demonstrativo de Diferença de Vencimentos</div>', unsafe_allow_html=True)
- 
+
 st.markdown("## 📁 Etapa 1: Seleção de Arquivos")
 col1, col2 = st.columns(2)
- 
+
 with col1:
-    st.markdown("### Header - F (.txt)")
+    st.markdown("### Arquivo Header (TXT)")
     file_header = st.file_uploader("Selecione o arquivo Header:", key=f"header_file_{st.session_state.uploader_key}")
     if file_header: st.success(f"✅ {file_header.name}")
- 
+
 with col2:
-    st.markdown("### Detail - V (.txt)")
+    st.markdown("### Arquivo Detail (TXT)")
     file_detail = st.file_uploader("Selecione o arquivo Detail:", key=f"detail_file_{st.session_state.uploader_key}")
     if file_detail: st.success(f"✅ {file_detail.name}")
- 
+
 st.markdown("---")
 col3, col4 = st.columns(2)
- 
+
 with col3:
-    st.markdown("### Índice de Correção (.txt)")
-    file_indices = st.file_uploader("Selecione o arquivo de índice de correção:", key=f"indices_file_{st.session_state.uploader_key}")
+    st.markdown("### Índices de Correção (TXT)")
+    file_indices = st.file_uploader("Selecione o arquivo de Índices (opcional):", key=f"indices_file_{st.session_state.uploader_key}")
     if file_indices: st.success(f"✅ {file_indices.name}")
- 
+
 with col4:
     st.markdown("### 📁 Diretório de Saída")
     if file_header and file_detail:
@@ -197,28 +197,28 @@ with col4:
         st.markdown("<div style='font-size: 14px; margin-bottom: 4px;'>&nbsp;</div>", unsafe_allow_html=True)
         st.warning("⚠️ Selecione os arquivos Header e Detail para definir o diretório de saída.")
         st.session_state.dir_saida = str(Path.home() / "Desktop" / "DDV_Output")
- 
+
 # --- Estrutura de Controles ---
 st.markdown("## ⚙️ Etapa 2: Processamento")
- 
+
 is_valid = file_header is not None and file_detail is not None
 if not is_valid:
-    st.warning("⚠️ Você precisa selecionar ao menos os arquivos Header e Detail para avançar.")
- 
+    st.warning("⚠️ Você precisa selecionar ao menos os arquivos Header e Detail para continuar.")
+
 col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 1])
- 
+
 with col_btn1:
-    btn_processar = st.button("🚀 PROCESSAR", type="primary", use_container_width=True, disabled=not is_valid)
+    btn_processar = st.button("🚀 PROCESSAR TUDO", type="primary", use_container_width=True, disabled=not is_valid)
 with col_btn2:
     btn_cancelar = st.button("🛑 CANCELAR", type="primary", use_container_width=True, disabled=not is_valid)
 with col_btn3:
-    btn_limpar = st.button("🧹 LIMPAR", type="secondary", use_container_width=True, on_click=limpar_tudo)
- 
+    btn_limpar = st.button("🧹 LIMPAR TUDO", type="secondary", use_container_width=True, on_click=limpar_tudo)
+
 if btn_cancelar:
     st.warning("⚠️ Processamento cancelado pelo usuário.")
     st.session_state.resultado_processamento = None
     st.session_state.processando = False
- 
+
 # --- Core de Processamento ---
 if btn_processar:
     st.session_state.processando = True
@@ -241,140 +241,105 @@ if btn_processar:
             if file_indices:
                 with open(temp_indices, "wb") as f: f.write(file_indices.getbuffer())
             
-            # --- Barras de progresso independentes ---
-            st.markdown("#### 🗄️ Access")
-            status_access = st.empty()
-            progress_access = st.progress(0)
-
-            st.markdown("#### 📊 Excel")
-            status_excel = st.empty()
-            progress_excel = st.progress(0)
-
-            # --- Leitura dos arquivos ---
-            status_access.info("📂 Lendo arquivos em memória...")
-            progress_access.progress(5)
-
-            with open(temp_header, 'r', encoding='cp1252') as f:
-                lines_h = [l for l in f if len(l) >= 180]
-
-            idx_list = []
-            if file_indices:
-                with open(temp_indices, 'r', encoding='cp1252') as f:
-                    for linha in f:
-                        if len(linha) >= 8:
-                            try:
-                                dt = datetime.datetime.strptime(linha[:8], "%Y%m%d")
-                                val = float(linha[8:].replace(',', '.')) / 100.0
-                                idx_list.append((dt, val))
-                            except (ValueError, IndexError):
-                                pass
-
-            dt_lim = idx_list[-1][0] if idx_list else datetime.datetime.now()
-
-            lines_d_valid = []
-            map_d = defaultdict(list)
-            with open(temp_detail, 'r', encoding='cp1252') as f:
-                for l in f:
-                    if len(l) >= 120:
-                        lines_d_valid.append(l)
-                        map_d[l[:12].strip() + l[12:21].strip()].append(l)
-
-            p_tpl_mdb = resource_path(os.path.join("Templates", "MDB-Matriz.mdb"))
-            p_tpl_xls = resource_path(os.path.join("Templates", "XLS-Matriz.xlsx"))
-
-            if not os.path.exists(p_tpl_mdb): raise FileNotFoundError(f"Template MDB ausente: {p_tpl_mdb}")
-            if not os.path.exists(p_tpl_xls): raise FileNotFoundError(f"Template XLS ausente: {p_tpl_xls}")
-
-            status_access.info("🗄️ Gerando banco de dados Access...")
-            progress_access.progress(10)
-
-            # Access roda na thread principal para evitar problemas COM/ODBC no Windows
-            # A barra anima via spinner nativo do Streamlit
-            with st.spinner("Aguarde — gerando arquivo Access..."):
+            status_container = st.container()
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            with status_container:
+                status_text.info("📂 Lendo e processando dados em memória...")
+                with open(temp_header, 'r', encoding='cp1252') as f:
+                    lines_h = [l for l in f if len(l) >= 180]
+                
+                idx_list = []
+                if file_indices:
+                    with open(temp_indices, 'r', encoding='cp1252') as f:
+                        for linha in f:
+                            if len(linha) >= 8:
+                                try:
+                                    dt = datetime.datetime.strptime(linha[:8], "%Y%m%d")
+                                    val = float(linha[8:].replace(',', '.'))
+                                    idx_list.append((dt, val))
+                                except (ValueError, IndexError):
+                                    pass
+                
+                dt_lim = idx_list[-1][0] if idx_list else datetime.datetime.now()
+                
+                lines_d_valid = []
+                map_d = defaultdict(list)
+                with open(temp_detail, 'r', encoding='cp1252') as f:
+                    for l in f:
+                        if len(l) >= 120:
+                            lines_d_valid.append(l)
+                            map_d[l[:12].strip() + l[12:21].strip()].append(l)
+                
+                status_text.info("🗄️ Gerando Banco de Dados (Access)...")
+                progress_bar.progress(10)
+                
+                p_tpl_mdb = resource_path(os.path.join("Templates", "MDB-Matriz.mdb"))
+                p_tpl_xls = resource_path(os.path.join("Templates", "XLS-Matriz.xlsx"))
+                
+                if not os.path.exists(p_tpl_mdb): raise FileNotFoundError(f"Template MDB ausente: {p_tpl_mdb}")
+                if not os.path.exists(p_tpl_xls): raise FileNotFoundError(f"Template XLS ausente: {p_tpl_xls}")
+                
+                ok_mdb, msg_mdb = gerar_mdb_access(lines_h, lines_d_valid, diretorio_final, st.session_state.rotina_selecionada, p_tpl_mdb)
+                
+                if not ok_mdb: st.warning(f"⚠️ {msg_mdb}")
+                else: st.success(f"✅ {msg_mdb}")
+                
+                status_text.info("📊 Processando planilhas Excel em paralelo...")
+                progress_bar.progress(30)
+                
+                # OTIMIZAÇÃO: tpl_info removido das tarefas para evitar gargalo de Pickling/Serialização
+                tasks = [
+                    (l, p_tpl_xls, diretorio_final, st.session_state.rotina_selecionada, 
+                     idx_list, map_d.get(l[:12].strip() + l[12:21].strip(), []), dt_lim)
+                    for l in lines_h
+                ]
+                
+                tot = len(tasks)
+                done = 0
+                errs = []
+                resultados = []
+                
+                # OTIMIZAÇÃO: ProcessPoolExecutor contorna o GIL para uso máximo de múltiplos núcleos da CPU
+                exe = concurrent.futures.ProcessPoolExecutor(max_workers=max(1, multiprocessing.cpu_count() - 1))
+                futs = {}
                 try:
-                    ok_mdb, msg_mdb = gerar_mdb_access(
-                        lines_h, lines_d_valid, diretorio_final,
-                        st.session_state.rotina_selecionada, p_tpl_mdb
-                    )
-                except Exception as ex:
-                    ok_mdb = False
-                    msg_mdb = f"Exceção em gerar_mdb_access: {str(ex)}"
-
-            progress_access.progress(100)
-            if not ok_mdb:
-                status_access.warning(f"⚠️ {msg_mdb}")
-            else:
-                status_access.success(f"✅ {msg_mdb}")
-
-            # --- Processamento Excel com barra em tempo real por arquivo ---
-            status_excel.info("⏳ Aguardando início do processamento Excel...")
-            progress_excel.progress(0)
-
-            tasks = [
-                (l, p_tpl_xls, diretorio_final, st.session_state.rotina_selecionada,
-                 idx_list, map_d.get(l[:12].strip() + l[12:21].strip(), []), dt_lim)
-                for l in lines_h
-            ]
-
-            tot = len(tasks)
-            done = 0
-            errs = []
-            resultados = []
-
-            MAX_WORKERS = min(4, max(1, multiprocessing.cpu_count() - 2))
-            CHUNK_SIZE = 50
-
-            exe = concurrent.futures.ProcessPoolExecutor(max_workers=MAX_WORKERS)
-            futs = {}
-            try:
-                for i in range(0, len(tasks), CHUNK_SIZE):
-                    chunk = tasks[i:i + CHUNK_SIZE]
-                    chunk_futs = {exe.submit(processar_arquivo_isolado, t): t for t in chunk}
-                    futs.update(chunk_futs)
-
-                    for f in concurrent.futures.as_completed(chunk_futs):
+                    futs = {exe.submit(processar_arquivo_isolado, t): t for t in tasks}
+                    for f in concurrent.futures.as_completed(futs):
                         try:
-                            res = f.result(timeout=120)
+                            res = f.result()
                             done += 1
-                            if "ERRO" in res:
-                                errs.append(res)
-                            else:
-                                resultados.append(res)
-                        except concurrent.futures.TimeoutError:
-                            errs.append(f"Timeout ao processar arquivo {done + 1}")
-                            done += 1
+                            if "ERRO" in res: errs.append(res)
+                            else: resultados.append(res)
+                            
+                            progress = 30 + (int((done / tot) * 60))
+                            progress_bar.progress(progress)
+                            status_text.info(f"📊 Planilhas Excel: {done}/{tot} ({int((done/tot)*100)}%) processadas")
                         except Exception as e:
                             errs.append(f"Falha na alocação do processo: {str(e)}")
                             done += 1
-
-                        # Atualiza barra Excel a cada arquivo concluído
-                        pct = int((done / tot) * 100)
-                        progress_excel.progress(pct)
-                        erros_ate_agora = len(errs)
-                        status_excel.info(f"📊 {done}/{tot} arquivos  |  ✅ {done - erros_ate_agora} OK  |  ❌ {erros_ate_agora} erros  |  {pct}%")
-
-            finally:
-                for f in futs:
-                    f.cancel()
-                exe.shutdown(wait=True)
-
-            progress_excel.progress(100)
-            status_excel.success(f"✅ Concluído: {tot - len(errs)}/{tot} planilhas geradas com sucesso.")
-
-            tempo_fim = datetime.datetime.now()
-            hora_fim_str = tempo_fim.strftime("%H:%M:%S")
-            tempo_total = tempo_fim - tempo_inicio
-            tempo_str = str(tempo_total).split('.')[0]
+                finally:
+                    for f in futs: f.cancel()
+                    exe.shutdown(wait=False)
                 
-            st.session_state.resultado_processamento = {
-                'hora_inicio': hora_inicio_str,
-                'hora_fim': hora_fim_str,
-                'tempo_total': tempo_str,
-                'sucesso': tot - len(errs),
-                'erros': len(errs),
-                'detalhes_erros': errs[:10],
-                'output_dir': diretorio_final
-            }
+                tempo_fim = datetime.datetime.now()
+                hora_fim_str = tempo_fim.strftime("%H:%M:%S")
+                tempo_total = tempo_fim - tempo_inicio
+                tempo_str = str(tempo_total).split('.')[0]
+                
+                progress_bar.progress(100)
+                status_text.success("✅ Processamento concluído com sucesso!")
+                
+                st.session_state.resultado_processamento = {
+                    'hora_inicio': hora_inicio_str,
+                    'hora_fim': hora_fim_str,
+                    'tempo_total': tempo_str,
+                    'sucesso': tot - len(errs),
+                    'erros': len(errs),
+                    'detalhes_erros': errs[:10],
+                    'output_dir': diretorio_final
+                }
                 
     except Exception as e:
         if type(e).__name__ in ('ScriptControlException', 'RerunException', 'StopException'):
@@ -383,7 +348,7 @@ if btn_processar:
         st.session_state.resultado_processamento = None
     finally:
         st.session_state.processando = False
- 
+
 # --- Renderização de Resultados ---
 if st.session_state.resultado_processamento:
     st.markdown("---")
@@ -416,5 +381,5 @@ if st.session_state.resultado_processamento:
         st.markdown('<div class="success-box">🎉 Execução finalizada sem advertências.</div>', unsafe_allow_html=True)
     else:
         st.markdown(f'<div class="warning-box">⚠️ Sub-processos corrompidos detectados: {res["erros"]} arquivo(s).</div>', unsafe_allow_html=True)
- 
+
 st.markdown("---")

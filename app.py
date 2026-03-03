@@ -139,7 +139,7 @@ if "uploader_key" not in st.session_state: st.session_state.uploader_key = 0
 
 # --- Renderização Sidebar ---
 st.sidebar.markdown("## ⚙️ Configuração")
-rotinas_disponiveis = ["SJ230133", "SJ071930", "SJ071984"]
+rotinas_disponiveis = ["SJ230133", "SJ071984"]
 st.session_state.rotina_selecionada = st.sidebar.selectbox(
     "Selecione a Rotina:",
     options=rotinas_disponiveis,

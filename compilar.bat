@@ -1,27 +1,24 @@
 @echo off
+setlocal enabledelayedexpansion
 
 echo ==========================================
-echo ATIVANDO AMBIENTE VIRTUAL...
+echo 1. LIMPANDO AMBIENTE E CACHE
 echo ==========================================
 call venv\Scripts\activate
 
-echo.
-echo ==========================================
-echo LIMPANDO CACHE E CORRIGINDO PYARROW...
-echo ==========================================
-if exist "%appdata%\pyinstaller" rmdir /s /q "%appdata%\pyinstaller"
-if exist "venv\Lib\site-packages\pyarrow\include" rmdir /s /q "venv\Lib\site-packages\pyarrow\include"
-if exist "build"    rmdir /s /q "build"
-if exist "dist"     rmdir /s /q "dist"
-if exist "DDV_App"  rmdir /s /q "DDV_App"
+if exist "build"     rmdir /s /q "build"
+if exist "dist"      rmdir /s /q "dist"
 del /f /q *.spec 2>nul
+del /f /q "DDV.exe" 2>nul
 
 echo.
 echo ==========================================
-echo INICIANDO EMPACOTAMENTO...
+echo 2. GERANDO EXECUTAVEL (SOLUCAO TKINTER)
 echo ==========================================
+:: Adicionamos --collect-all tkinter para garantir que o filedialog funcione
+:: Adicionamos --hidden-import tkinter.filedialog explicitamente
 pyinstaller --noconfirm --clean ^
-    --onedir ^
+    --onefile ^
     --windowed ^
     --name "DDV" ^
     --add-data "app.py;." ^
@@ -30,6 +27,9 @@ pyinstaller --noconfirm --clean ^
     --add-data "Templates;Templates/" ^
     --add-data "icons;icons/" ^
     --collect-all streamlit ^
+    --collect-all tkinter ^
+    --hidden-import "tkinter" ^
+    --hidden-import "tkinter.filedialog" ^
     --hidden-import "openpyxl" ^
     --hidden-import "pandas" ^
     --hidden-import "pyodbc" ^
@@ -43,20 +43,24 @@ pyinstaller --noconfirm --clean ^
 
 echo.
 echo ==========================================
-echo FINALIZANDO E LIMPANDO...
+echo 3. POS-PROCESSAMENTO E LIMPEZA
 echo ==========================================
-if exist "dist\DDV\DDV.exe" (
-    xcopy /e /i /y "dist\DDV" "DDV_App\"
+
+if exist "dist\DDV.exe" (
+    move /y "dist\DDV.exe" "."
+    
+    :: Limpeza final de pastas para deixar apenas o .exe
     rmdir /s /q "build"
     rmdir /s /q "dist"
     del /f /q "DDV.spec"
+
     echo.
     echo =============================================
-    echo  SUCESSO! Distribua a pasta DDV_App\ inteira
-    echo  Execute: DDV_App\DDV.exe
+    echo   SUCESSO! Executavel 'DDV.exe' pronto.
     echo =============================================
 ) else (
-    echo [ERRO] O executavel nao foi gerado. Verifique o log acima.
+    echo.
+    echo [ERRO] O executavel nao foi gerado. Verifique os logs acima.
 )
 
 pause

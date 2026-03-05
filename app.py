@@ -82,6 +82,19 @@ def selecionar_pasta_windows(pasta_inicial=None):
         st.error(f"Erro de renderização do Tkinter: {str(e)}")
         return None
 
+def ler_arquivo_com_fallback(caminho):
+    """Tenta ler o arquivo como UTF-8; se falhar, usa ANSI (cp1252)."""
+    for enc in ("utf-8-sig", "utf-8", "cp1252"):
+        try:
+            with open(caminho, 'r', encoding=enc) as f:
+                linhas = f.readlines()
+            return linhas
+        except (UnicodeDecodeError, LookupError):
+            continue
+    # Último recurso: leitura com erros ignorados
+    with open(caminho, 'r', encoding='cp1252', errors='replace') as f:
+        return f.readlines()
+
 # --- Callbacks de UI ---
 def on_browse_click():
     pasta_selecionada = selecionar_pasta_windows(st.session_state.dir_saida)
@@ -119,7 +132,7 @@ custom_css = """
     [data-testid="stFileUploadDropzone"] > div > div > span, [data-testid="stFileUploaderDropzone"] > div > div > span { display: none !important; }
     [data-testid="stFileUploadDropzone"] > div > div > small, [data-testid="stFileUploaderDropzone"] > div > div > small { display: none !important; }
     [data-testid="stFileUploadDropzone"] > div > div::before, [data-testid="stFileUploaderDropzone"] > div > div::before { content: "Arraste e solte o arquivo aqui" !important; color: #31333F !important; font-size: 16px !important; font-weight: 500 !important; display: block !important; margin-bottom: 5px !important; }
-    [data-testid="stFileUploadDropzone"] > div > div::after, [data-testid="stFileUploaderDropzone"] > div > div::after { content: "Limite de 500MB por arquivo • TXT" !important; color: #888 !important; font-size: 14px !important; display: block !important; }
+    
 """
 
 if b64_file_open:
@@ -157,22 +170,37 @@ st.markdown('<div class="subtitle">Demonstrativo de Diferença de Vencimentos</d
 st.markdown("## 📁 Etapa 1: Seleção de Arquivos")
 col1, col2 = st.columns(2)
 
+# Tipos de arquivo aceitos: TXT e TMP
+TIPOS_ACEITOS = ["text/plain", ".txt", ".tmp"]
+
 with col1:
-    st.markdown("### Arquivo Header (TXT)")
-    file_header = st.file_uploader("Selecione o arquivo Header:", key=f"header_file_{st.session_state.uploader_key}")
+    st.markdown("### Arquivo Header (TXT / TMP)")
+    file_header = st.file_uploader(
+        "Selecione o arquivo Header:",
+        key=f"header_file_{st.session_state.uploader_key}",
+        type=["txt", "tmp"]
+    )
     if file_header: st.success(f"✅ {file_header.name}")
 
 with col2:
-    st.markdown("### Arquivo Detail (TXT)")
-    file_detail = st.file_uploader("Selecione o arquivo Detail:", key=f"detail_file_{st.session_state.uploader_key}")
+    st.markdown("### Arquivo Detail (TXT / TMP)")
+    file_detail = st.file_uploader(
+        "Selecione o arquivo Detail:",
+        key=f"detail_file_{st.session_state.uploader_key}",
+        type=["txt", "tmp"]
+    )
     if file_detail: st.success(f"✅ {file_detail.name}")
 
 st.markdown("---")
 col3, col4 = st.columns(2)
 
 with col3:
-    st.markdown("### Índices de Correção (TXT)")
-    file_indices = st.file_uploader("Selecione o arquivo de Índices (opcional):", key=f"indices_file_{st.session_state.uploader_key}")
+    st.markdown("### Índices de Correção (TXT / TMP)")
+    file_indices = st.file_uploader(
+        "Selecione o arquivo de Índices (opcional):",
+        key=f"indices_file_{st.session_state.uploader_key}",
+        type=["txt", "tmp"]
+    )
     if file_indices: st.success(f"✅ {file_indices.name}")
 
 with col4:
@@ -181,7 +209,7 @@ with col4:
         nome_base = Path(file_header.name).stem
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         nome_saida = f"{nome_base}_{timestamp}"
-        diretorio_base_desktop = str(Path.home() / "Desktop" / "DDV_Output" / nome_saida)
+        diretorio_base_desktop = str(Path.home() / "Desktop" / nome_saida)
         
         if not st.session_state.dir_saida:
             st.session_state.dir_saida = diretorio_base_desktop
@@ -247,30 +275,30 @@ if btn_processar:
             
             with status_container:
                 status_text.info("📂 Lendo e processando dados em memória...")
-                with open(temp_header, 'r', encoding='cp1252') as f:
-                    lines_h = [l for l in f if len(l) >= 180]
+
+                # Leitura com fallback UTF-8 → ANSI (cp1252)
+                lines_h_raw = ler_arquivo_com_fallback(temp_header)
+                lines_h = [l for l in lines_h_raw if len(l) >= 180]
                 
                 idx_list = []
                 if file_indices:
-                    with open(temp_indices, 'r', encoding='cp1252') as f:
-                        for linha in f:
-                            if len(linha) >= 8:
-                                try:
-                                    dt = datetime.datetime.strptime(linha[:8], "%Y%m%d")
-                                    val = float(linha[8:].replace(',', '.'))
-                                    idx_list.append((dt, val))
-                                except (ValueError, IndexError):
-                                    pass
+                    for linha in ler_arquivo_com_fallback(temp_indices):
+                        if len(linha) >= 8:
+                            try:
+                                dt = datetime.datetime.strptime(linha[:8], "%Y%m%d")
+                                val = float(linha[8:].replace(',', '.'))
+                                idx_list.append((dt, val))
+                            except (ValueError, IndexError):
+                                pass
                 
                 dt_lim = idx_list[-1][0] if idx_list else datetime.datetime.now()
                 
                 lines_d_valid = []
                 map_d = defaultdict(list)
-                with open(temp_detail, 'r', encoding='cp1252') as f:
-                    for l in f:
-                        if len(l) >= 120:
-                            lines_d_valid.append(l)
-                            map_d[l[:12].strip() + l[12:21].strip()].append(l)
+                for l in ler_arquivo_com_fallback(temp_detail):
+                    if len(l) >= 120:
+                        lines_d_valid.append(l)
+                        map_d[l[:12].strip() + l[12:21].strip()].append(l)
                 
                 status_text.info("🗄️ Gerando Banco de Dados (Access)...")
                 progress_bar.progress(10)

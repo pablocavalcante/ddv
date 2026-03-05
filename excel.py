@@ -13,7 +13,8 @@ class TemplateInfo:
     def __init__(self):
         self.formulas_linha_modelo = {} 
         self.estilos_linha_modelo = {}  
-        self.dados_footer = []          
+        self.dados_footer = []
+        self.start_footer_original = 18
 
 def _eh_formula(valor):
     """Verifica se o valor é uma fórmula."""
@@ -34,9 +35,20 @@ def extrair_info_template(wb):
         info.estilos_linha_modelo[col] = cell._style
         info.formulas_linha_modelo[col] = cell.value if _eh_formula(cell.value) else None
 
-    # 2. Footer - Otimizado
+    # 2. Localiza dinamicamente a linha original de "TOTAIS" no rodapé
     start_footer = 18
-    for r in range(start_footer, ws.max_row + 20): 
+    for r in range(18, ws.max_row + 1):
+        if any(ws.cell(row=r, column=c).value and "TOTAIS" in str(ws.cell(row=r, column=c).value).strip().upper() for c in range(1, 4)):
+            if not any(ws.cell(row=r-1, column=c).value for c in range(1, ws.max_column + 1)):
+                start_footer = r - 1
+            else:
+                start_footer = r
+            break
+            
+    info.start_footer_original = start_footer
+
+    # 3. Guarda o Footer na memória
+    for r in range(start_footer, ws.max_row + 5): 
         row_data = []
         for c in range(1, ws.max_column + 1):
             cell = ws.cell(row=r, column=c)
@@ -58,7 +70,13 @@ def processar_arquivo_isolado(args):
     try:
         proc = line_h[0:12].strip()
         rf = line_h[12:21].strip()
-        autor = line_h[87:119].strip()
+        
+        # Filtro Extremo: Permite APENAS letras e espaços. Destrói o "quadrado".
+        autor_raw = line_h[87:118]
+        autor_clean = re.sub(r'[^a-zA-ZÀ-ÿ\s]', '', autor_raw)
+        nome_puro = re.sub(r'\s+[A-Za-z]\s*$', '', autor_clean).strip()
+        autor_formatado = nome_puro.ljust(31)
+        
         padrao = line_h[171:180].strip()
 
         nome_arq = f"{rotina}_{proc}-{rf}.xlsx"
@@ -67,13 +85,17 @@ def processar_arquivo_isolado(args):
         os.makedirs(p_folder, exist_ok=True)
         path = os.path.join(p_folder, nome_arq)
 
-        # O trabalhador (processo) abre o ficheiro uma única vez de forma independente
         wb = openpyxl.load_workbook(template_path)
-        
-        # Lê a informação do template usando o ficheiro que acabou de abrir
         tpl_info = extrair_info_template(wb)
-        
         ws = wb["Receitas"]
+        
+        # =========================================================
+        # LIMPEZA PROFUNDA: DESTRUIR AS LINHAS FANTASMAS DO TEMPLATE
+        # Deletamos TUDO da linha 18 para baixo antes de escrever.
+        if ws.max_row >= 18:
+            ws.delete_rows(18, ws.max_row - 17)
+        # =========================================================
+        
         ws_idx = wb["TOTINDICE"]
 
         # Indices
@@ -87,9 +109,8 @@ def processar_arquivo_isolado(args):
                 r_idx += 1
 
         ws["C7"] = proc
-        ws["C8"] = f"{autor} - RF: {rf}"
+        ws["C8"] = f"{autor_formatado}- RF : {rf}"
 
-        # Detalhes - Usa constantes congeladas
         def sort_key(x): return x[23:27] + x[21:23]
         detalhes.sort(key=sort_key)
         
@@ -107,64 +128,58 @@ def processar_arquivo_isolado(args):
             v_funfin = sum(float(l[116:126]) for l in g if l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) >= 2019) / 100.0
             v_funprev = sum(float(l[116:126]) for l in g if l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) >= 2019) / 100.0
 
-            val_q = (t_venc - t_desc) + v_iprem + v_hspm
+            val_q = round((t_venc - t_desc) + v_iprem + v_hspm, 2)
+            
+            # --- CORREÇÃO SUPREMA: FILTRO ESTRITO ---
+            # Se a diferença principal (valor da coluna B) for zero, a linha é inútil.
+            # Ignoramos a linha sumariamente, eliminando os campos vazios.
+            if val_q == 0:
+                continue
             
             ano, mes = int(key[:4]), int(key[4:])
             nxt = datetime.datetime(ano, mes, 28) + datetime.timedelta(days=4)
             last_dt = nxt - datetime.timedelta(days=nxt.day)
 
-            # Adicionando na lista usando last_dt
             rows_data.append({
                 'dt': last_dt,  
                 'q': val_q,
-                'iprem': v_iprem,
-                'hspm': v_hspm,
-                'funfin': v_funfin,
-                'funprev': v_funprev
+                'iprem': round(v_iprem, 2),
+                'hspm': round(v_hspm, 2),
+                'funfin': round(v_funfin, 2),
+                'funprev': round(v_funprev, 2)
             })
 
         curr = 17
-        
-        # Colunas preenchidas ativamente pelo código não devem receber fórmula do template original
         colunas_valores_txt = {1, 2, 4, 5, 6, 7} 
         
         for d in rows_data:
-            # 1. Aplica o estilo e fórmula primeiro
             for col in range(1, ws.max_column + 1):
                 cell = ws.cell(curr, col)
                 st_id = tpl_info.estilos_linha_modelo.get(col)
                 fm = tpl_info.formulas_linha_modelo.get(col)
                 
-                # APLICAÇÃO DE ESTILO RELÂMPAGO
                 if st_id is not None:
                     cell._style = st_id
                 
-                # INJEÇÃO DA FÓRMULA NA COLUNA C (3) COM REFERÊNCIA FIXA EM $D$10/1
                 if col == 3:
                     cell.value = f'=B{curr}*$D$10/1'
-                # Aplicar fórmula do template APENAS nas colunas que não recebem TXT
                 elif fm and col not in colunas_valores_txt:
                     cell.value = fm.replace("17", str(curr))
 
-            # 2. Insere os valores diretos do TXT nas novas colunas
             ws.cell(curr, 1, d['dt'])
             ws.cell(curr, 2, d['q'])
-            
-            # Garantir que valores zerados sejam interpretados como 0 ou nulos dependendo da formatação
-            # e que o valor gravado seja estritamente o número extraído
-            ws.cell(curr, 4, d.get('iprem', 0) if d.get('iprem', 0) > 0 else "")    # Coluna D
-            ws.cell(curr, 5, d.get('hspm', 0) if d.get('hspm', 0) > 0 else "")     # Coluna E
-            ws.cell(curr, 6, d.get('funfin', 0) if d.get('funfin', 0) > 0 else "")   # Coluna F
-            ws.cell(curr, 7, d.get('funprev', 0) if d.get('funprev', 0) > 0 else "")  # Coluna G
+            ws.cell(curr, 4, d.get('iprem') if d.get('iprem') > 0 else "")    
+            ws.cell(curr, 5, d.get('hspm') if d.get('hspm') > 0 else "")     
+            ws.cell(curr, 6, d.get('funfin') if d.get('funfin') > 0 else "")   
+            ws.cell(curr, 7, d.get('funprev') if d.get('funprev') > 0 else "") 
 
             curr += 1
 
-        # Footer
+        # Reconstrução do Footer logo após a última linha de dados válida
         linha_fim_dados = curr - 1
-        offset = curr - 18
+        offset = curr - tpl_info.start_footer_original
         
         def processar_formula_footer(val, linha_fim, offset_val):
-            """Atualiza as fórmulas do rodapé usando Cláusulas de Guarda."""
             if not _eh_formula(val):
                 return val
                 
@@ -177,7 +192,7 @@ def processar_arquivo_isolado(args):
 
             def deslocar_linha(m):
                 linha_atual = int(m.group(2))
-                return f"{m.group(1)}{linha_atual + offset_val}" if linha_atual >= 18 else m.group(0)
+                return f"{m.group(1)}{linha_atual + offset_val}" if linha_atual >= tpl_info.start_footer_original else m.group(0)
                 
             nova_formula = re.sub(r"([A-Z]+)(\d+)", deslocar_linha, val)
             
@@ -188,8 +203,6 @@ def processar_arquivo_isolado(args):
         
         for i, r_dat in enumerate(tpl_info.dados_footer):
             r_w = curr + i
-            
-            # Identifica se a linha atual do rodapé é a linha escrita "Totais"
             is_totais = any(str(c['value']).strip().lower() == 'totais' for c in r_dat if c['value'] is not None)
             
             for j, c_dat in enumerate(r_dat):
@@ -198,10 +211,8 @@ def processar_arquivo_isolado(args):
                 val = c_dat['value']
                 
                 if is_totais:
-                    # Coluna B: Não deve somar o total. Deixa em branco.
                     if col == 2:
                         val = ""
-                    # Colunas C, D, E, F e G: Aplica a fórmula de soma corrigida do topo até o fim dos dados
                     elif col in {3, 4, 5, 6, 7}:
                         letras_soma = {3:'C', 4:'D', 5:'E', 6:'F', 7:'G'}
                         letra = letras_soma[col]
@@ -213,11 +224,9 @@ def processar_arquivo_isolado(args):
                 
                 cell.value = val
                 
-                # APLICAÇÃO DE ESTILO RELÂMPAGO NO FOOTER
                 if c_dat['_style'] is not None:
                     cell._style = c_dat['_style']
                     
-                # Se for a célula B da linha de Totais, garante que qualquer preenchimento de erro anterior não force visual estranho
                 if is_totais and col == 2:
                     cell.fill = PatternFill(fill_type=None)
 

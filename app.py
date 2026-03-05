@@ -13,14 +13,13 @@ from collections import defaultdict
 import streamlit as st
 
 from access import gerar_mdb_access
-# IMPORTANTE: extrair_info_template foi removido daqui pois agora vive dentro do trabalhador
 from excel import processar_arquivo_isolado
 
-# Omissão de avisos não críticos gerados por reexecuções dinâmicas do Streamlit
+# Oculta avisos não críticos do Streamlit
 warnings.filterwarnings("ignore", message=".*missing ScriptRunContext.*")
 warnings.filterwarnings("ignore", message=".*Process.*finalized.*")
 
-# Força o método de inicialização 'spawn' no Windows para evitar travamentos de concorrência
+# Força o método 'spawn' no Windows para evitar travamentos de concorrência
 if sys.platform == "win32":
     multiprocessing.set_start_method("spawn", force=True)
 
@@ -45,14 +44,24 @@ def get_base64_image(image_path):
 def abrir_explorador(caminho):
     try:
         if sys.platform == "win32":
-            os.startfile(caminho)
+            import ctypes
+            caminho_norm = os.path.normpath(caminho)
+            
+            # Simula um toque na tecla ALT (0x12) para desativar o bloqueio de tela do Windows
+            ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)
+            ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)
+            
+            # Abre o Explorer em primeiro plano
+            ctypes.windll.shell32.ShellExecuteW(None, "explore", caminho_norm, None, None, 1)
+            
         elif sys.platform == "darwin":
             subprocess.Popen(["open", caminho])
         else:
             subprocess.Popen(["xdg-open", caminho])
         return True
     except Exception as e:
-        st.error(f"Falha na integração com o SO: {str(e)}")
+        import streamlit as st
+        st.error(f"Falha ao abrir a pasta: {str(e)}")
         return False
 
 def selecionar_pasta_windows(pasta_inicial=None):
@@ -87,11 +96,11 @@ def ler_arquivo_com_fallback(caminho):
     for enc in ("utf-8-sig", "utf-8", "cp1252"):
         try:
             with open(caminho, 'r', encoding=enc) as f:
-                linhas = f.readlines()
-            return linhas
+                return f.readlines()
         except (UnicodeDecodeError, LookupError):
             continue
-    # Último recurso: leitura com erros ignorados
+            
+    # Leitura de contingência ignorando caracteres corrompidos
     with open(caminho, 'r', encoding='cp1252', errors='replace') as f:
         return f.readlines()
 
@@ -132,7 +141,6 @@ custom_css = """
     [data-testid="stFileUploadDropzone"] > div > div > span, [data-testid="stFileUploaderDropzone"] > div > div > span { display: none !important; }
     [data-testid="stFileUploadDropzone"] > div > div > small, [data-testid="stFileUploaderDropzone"] > div > div > small { display: none !important; }
     [data-testid="stFileUploadDropzone"] > div > div::before, [data-testid="stFileUploaderDropzone"] > div > div::before { content: "Arraste e solte o arquivo aqui" !important; color: #31333F !important; font-size: 16px !important; font-weight: 500 !important; display: block !important; margin-bottom: 5px !important; }
-    
 """
 
 if b64_file_open:
@@ -170,25 +178,14 @@ st.markdown('<div class="subtitle">Demonstrativo de Diferença de Vencimentos</d
 st.markdown("## 📁 Etapa 1: Seleção de Arquivos")
 col1, col2 = st.columns(2)
 
-# Tipos de arquivo aceitos: TXT e TMP
-TIPOS_ACEITOS = ["text/plain", ".txt", ".tmp"]
-
 with col1:
     st.markdown("### Arquivo Header (TXT / TMP)")
-    file_header = st.file_uploader(
-        "Selecione o arquivo Header:",
-        key=f"header_file_{st.session_state.uploader_key}",
-        type=["txt", "tmp"]
-    )
+    file_header = st.file_uploader("Selecione o arquivo Header:", key=f"header_file_{st.session_state.uploader_key}", type=["txt", "tmp"])
     if file_header: st.success(f"✅ {file_header.name}")
 
 with col2:
     st.markdown("### Arquivo Detail (TXT / TMP)")
-    file_detail = st.file_uploader(
-        "Selecione o arquivo Detail:",
-        key=f"detail_file_{st.session_state.uploader_key}",
-        type=["txt", "tmp"]
-    )
+    file_detail = st.file_uploader("Selecione o arquivo Detail:", key=f"detail_file_{st.session_state.uploader_key}", type=["txt", "tmp"])
     if file_detail: st.success(f"✅ {file_detail.name}")
 
 st.markdown("---")
@@ -196,11 +193,7 @@ col3, col4 = st.columns(2)
 
 with col3:
     st.markdown("### Índices de Correção (TXT / TMP)")
-    file_indices = st.file_uploader(
-        "Selecione o arquivo de Índices (opcional):",
-        key=f"indices_file_{st.session_state.uploader_key}",
-        type=["txt", "tmp"]
-    )
+    file_indices = st.file_uploader("Selecione o arquivo de Índices (opcional):", key=f"indices_file_{st.session_state.uploader_key}", type=["txt", "tmp"])
     if file_indices: st.success(f"✅ {file_indices.name}")
 
 with col4:
@@ -269,14 +262,12 @@ if btn_processar:
             if file_indices:
                 with open(temp_indices, "wb") as f: f.write(file_indices.getbuffer())
             
+            # Container principal para os status
             status_container = st.container()
-            progress_bar = st.progress(0)
-            status_text = st.empty()
             
             with status_container:
-                status_text.info("📂 Lendo e processando dados em memória...")
+                st.info("📂 Lendo e processando dados em memória...")
 
-                # Leitura com fallback UTF-8 → ANSI (cp1252)
                 lines_h_raw = ler_arquivo_com_fallback(temp_header)
                 lines_h = [l for l in lines_h_raw if len(l) >= 180]
                 
@@ -300,8 +291,12 @@ if btn_processar:
                         lines_d_valid.append(l)
                         map_d[l[:12].strip() + l[12:21].strip()].append(l)
                 
-                status_text.info("🗄️ Gerando Banco de Dados (Access)...")
-                progress_bar.progress(10)
+                # --- Progresso do Access ---
+                st.markdown("#### 🗄️ Etapa A: Banco de Dados (Access)")
+                access_status = st.empty()
+                access_bar = st.progress(0)
+                access_status.info("Gerando arquivo .mdb...")
+                access_bar.progress(25) # Barra simulando o início do processo
                 
                 p_tpl_mdb = resource_path(os.path.join("Templates", "MDB-Matriz.mdb"))
                 p_tpl_xls = resource_path(os.path.join("Templates", "XLS-Matriz.xlsx"))
@@ -311,13 +306,16 @@ if btn_processar:
                 
                 ok_mdb, msg_mdb = gerar_mdb_access(lines_h, lines_d_valid, diretorio_final, st.session_state.rotina_selecionada, p_tpl_mdb)
                 
-                if not ok_mdb: st.warning(f"⚠️ {msg_mdb}")
-                else: st.success(f"✅ {msg_mdb}")
+                access_bar.progress(100) # Enche a barra do Access ao finalizar
+                if not ok_mdb: access_status.warning(f"⚠️ {msg_mdb}")
+                else: access_status.success(f"✅ {msg_mdb}")
                 
-                status_text.info("📊 Processando planilhas Excel em paralelo...")
-                progress_bar.progress(30)
+                # --- Progresso do Excel ---
+                st.markdown("#### 📊 Etapa B: Planilhas Excel")
+                excel_status = st.empty()
+                excel_bar = st.progress(0)
+                excel_status.info("Iniciando processamento paralelo...")
                 
-                # OTIMIZAÇÃO: tpl_info removido das tarefas para evitar gargalo de Pickling/Serialização
                 tasks = [
                     (l, p_tpl_xls, diretorio_final, st.session_state.rotina_selecionada, 
                      idx_list, map_d.get(l[:12].strip() + l[12:21].strip(), []), dt_lim)
@@ -329,35 +327,36 @@ if btn_processar:
                 errs = []
                 resultados = []
                 
-                # OTIMIZAÇÃO: ProcessPoolExecutor contorna o GIL para uso máximo de múltiplos núcleos da CPU
-                exe = concurrent.futures.ProcessPoolExecutor(max_workers=max(1, multiprocessing.cpu_count() - 1))
-                futs = {}
-                try:
-                    futs = {exe.submit(processar_arquivo_isolado, t): t for t in tasks}
-                    for f in concurrent.futures.as_completed(futs):
-                        try:
-                            res = f.result()
-                            done += 1
-                            if "ERRO" in res: errs.append(res)
-                            else: resultados.append(res)
-                            
-                            progress = 30 + (int((done / tot) * 60))
-                            progress_bar.progress(progress)
-                            status_text.info(f"📊 Planilhas Excel: {done}/{tot} ({int((done/tot)*100)}%) processadas")
-                        except Exception as e:
-                            errs.append(f"Falha na alocação do processo: {str(e)}")
-                            done += 1
-                finally:
-                    for f in futs: f.cancel()
-                    exe.shutdown(wait=False)
+                if tot > 0:
+                    # Execução em paralelo real contornando o GIL do Python
+                    exe = concurrent.futures.ProcessPoolExecutor(max_workers=max(1, multiprocessing.cpu_count() - 1))
+                    futs = {}
+                    try:
+                        futs = {exe.submit(processar_arquivo_isolado, t): t for t in tasks}
+                        for f in concurrent.futures.as_completed(futs):
+                            try:
+                                res = f.result()
+                                done += 1
+                                if "ERRO" in res: errs.append(res)
+                                else: resultados.append(res)
+                                
+                                pct = int((done / tot) * 100)
+                                excel_bar.progress(pct) # Atualiza a barra de forma precisa (0 a 100)
+                                excel_status.info(f"Processando: {done}/{tot} ({pct}%) planilhas concluídas")
+                            except Exception as e:
+                                errs.append(f"Falha na alocação do processo: {str(e)}")
+                                done += 1
+                    finally:
+                        for f in futs: f.cancel()
+                        exe.shutdown(wait=False)
+                
+                excel_bar.progress(100)
+                excel_status.success("✅ Geração de planilhas finalizada!")
                 
                 tempo_fim = datetime.datetime.now()
                 hora_fim_str = tempo_fim.strftime("%H:%M:%S")
                 tempo_total = tempo_fim - tempo_inicio
                 tempo_str = str(tempo_total).split('.')[0]
-                
-                progress_bar.progress(100)
-                status_text.success("✅ Processamento concluído com sucesso!")
                 
                 st.session_state.resultado_processamento = {
                     'hora_inicio': hora_inicio_str,

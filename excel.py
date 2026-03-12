@@ -31,7 +31,6 @@ def extrair_info_template(wb):
     # 1. Linha Modelo (17)
     for col in range(1, ws.max_column + 1):
         cell = ws.cell(row=17, column=col)
-        # Copia apenas o ID numérico do estilo. Evita cópias pesadas de memória.
         info.estilos_linha_modelo[col] = cell._style
         info.formulas_linha_modelo[col] = cell.value if _eh_formula(cell.value) else None
 
@@ -91,7 +90,6 @@ def processar_arquivo_isolado(args):
         
         # =========================================================
         # LIMPEZA PROFUNDA: DESTRUIR AS LINHAS FANTASMAS DO TEMPLATE
-        # Deletamos TUDO da linha 18 para baixo antes de escrever.
         if ws.max_row >= 18:
             ws.delete_rows(18, ws.max_row - 17)
         # =========================================================
@@ -117,23 +115,45 @@ def processar_arquivo_isolado(args):
         rows_data = []
         last_dt = None
 
+        # Flag para saber quando o primeiro valor válido apareceu nas colunas
+        iniciou_lancamentos = False
+
         for key, group in groupby(detalhes, key=sort_key):
             g = list(group)
-            t_venc = sum(float(l[86:96]) for l in g) / 100.0
-            t_desc = sum(float(l[116:126]) for l in g) / 100.0
             
-            v_iprem = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_IPREM or (l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) < 2019)) / 100.0
-            v_hspm = sum(float(l[116:126]) for l in g if l[27:31] in CODIGOS_HSPM or (l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) < 2019)) / 100.0
+            # SOMA COMO INTEIROS PRIMEIRO: Garante que os cêntimos não se percam por causa da flutuação do Python
+            soma_venc = sum(int(l[86:96]) for l in g)
+            soma_desc = sum(int(l[116:126]) for l in g)
             
-            v_funfin = sum(float(l[116:126]) for l in g if l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) >= 2019) / 100.0
-            v_funprev = sum(float(l[116:126]) for l in g if l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) >= 2019) / 100.0
+            soma_iprem = sum(int(l[116:126]) for l in g if l[27:31] in CODIGOS_IPREM or (l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) < 2019))
+            soma_hspm = sum(int(l[116:126]) for l in g if l[27:31] in CODIGOS_HSPM or (l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) < 2019))
+            
+            soma_funfin = sum(int(l[116:126]) for l in g if l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) >= 2019)
+            soma_funprev = sum(int(l[116:126]) for l in g if l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) >= 2019)
+
+            # Só depois divide por 100 para transformar em valores financeiros (float)
+            t_venc = soma_venc / 100.0
+            t_desc = soma_desc / 100.0
+            v_iprem = soma_iprem / 100.0
+            v_hspm = soma_hspm / 100.0
+            v_funfin = soma_funfin / 100.0
+            v_funprev = soma_funprev / 100.0
 
             val_q = round((t_venc - t_desc) + v_iprem + v_hspm, 2)
             
-            # --- CORREÇÃO SUPREMA: FILTRO ESTRITO ---
-            # Se a diferença principal (valor da coluna B) for zero, a linha é inútil.
-            # Ignoramos a linha sumariamente, eliminando os campos vazios.
-            if val_q == 0:
+            # --- CORREÇÃO SUPREMA: FILTRO INTELIGENTE ---
+            # Verifica se EXISTE algum valor válido (seja principal, IPREM, etc.)
+            tem_valor_na_linha = (val_q != 0 or v_iprem != 0 or v_hspm != 0 or v_funfin != 0 or v_funprev != 0)
+            
+            if tem_valor_na_linha:
+                iniciou_lancamentos = True  # Encontramos os primeiros valores, agora não paramos mais!
+                
+            # Se ainda não iniciámos os lançamentos, saltamos os meses anteriores totalmente zerados
+            if not iniciou_lancamentos:
+                continue
+                
+            # Se já iniciámos mas este mês em específico está 100% zerado, também o descartamos para ficar limpo
+            if not tem_valor_na_linha:
                 continue
             
             ano, mes = int(key[:4]), int(key[4:])

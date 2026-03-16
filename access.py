@@ -15,7 +15,12 @@ def gerar_mdb_access(header_lines, detail_lines_raw, output_folder, rotina, temp
     Popula o MDB Matriz com os dados lidos do TXT.
     """
     nome_mdb = f"{rotina}.mdb"
-    caminho_final = os.path.join(output_folder, nome_mdb)
+    
+    # --- CORREÇÃO: DIRECIONA PARA A PASTA COM A DATA DE HOJE ---
+    day_folder = os.path.join(output_folder, datetime.datetime.now().strftime("%Y-%m-%d"))
+    os.makedirs(day_folder, exist_ok=True) # Garante que a pasta existe
+    caminho_final = os.path.join(day_folder, nome_mdb)
+    # -----------------------------------------------------------
     
     try:
         # Validações iniciais (fail-fast)

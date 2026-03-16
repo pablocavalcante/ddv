@@ -115,13 +115,11 @@ def processar_arquivo_isolado(args):
         rows_data = []
         last_dt = None
 
-        # Flag para saber quando o primeiro valor válido apareceu nas colunas
-        iniciou_lancamentos = False
-
+        # Processamos todos os meses que existem no ficheiro, sem restrições
         for key, group in groupby(detalhes, key=sort_key):
             g = list(group)
             
-            # SOMA COMO INTEIROS PRIMEIRO: Garante que os cêntimos não se percam por causa da flutuação do Python
+            # SOMA COMO INTEIROS PRIMEIRO
             soma_venc = sum(int(l[86:96]) for l in g)
             soma_desc = sum(int(l[116:126]) for l in g)
             
@@ -131,7 +129,7 @@ def processar_arquivo_isolado(args):
             soma_funfin = sum(int(l[116:126]) for l in g if l[27:31] == "7011" and l[23:27].isdigit() and int(l[23:27]) >= 2019)
             soma_funprev = sum(int(l[116:126]) for l in g if l[27:31] == "7012" and l[23:27].isdigit() and int(l[23:27]) >= 2019)
 
-            # Só depois divide por 100 para transformar em valores financeiros (float)
+            # Só depois divide por 100
             t_venc = soma_venc / 100.0
             t_desc = soma_desc / 100.0
             v_iprem = soma_iprem / 100.0
@@ -141,25 +139,11 @@ def processar_arquivo_isolado(args):
 
             val_q = round((t_venc - t_desc) + v_iprem + v_hspm, 2)
             
-            # --- CORREÇÃO SUPREMA: FILTRO INTELIGENTE ---
-            # Verifica se EXISTE algum valor válido (seja principal, IPREM, etc.)
-            tem_valor_na_linha = (val_q != 0 or v_iprem != 0 or v_hspm != 0 or v_funfin != 0 or v_funprev != 0)
-            
-            if tem_valor_na_linha:
-                iniciou_lancamentos = True  # Encontramos os primeiros valores, agora não paramos mais!
-                
-            # Se ainda não iniciámos os lançamentos, saltamos os meses anteriores totalmente zerados
-            if not iniciou_lancamentos:
-                continue
-                
-            # Se já iniciámos mas este mês em específico está 100% zerado, também o descartamos para ficar limpo
-            if not tem_valor_na_linha:
-                continue
-            
             ano, mes = int(key[:4]), int(key[4:])
             nxt = datetime.datetime(ano, mes, 28) + datetime.timedelta(days=4)
             last_dt = nxt - datetime.timedelta(days=nxt.day)
 
+            # Guardamos os valores todos, mesmo que sejam zero (0.0)
             rows_data.append({
                 'dt': last_dt,  
                 'q': val_q,
@@ -186,12 +170,13 @@ def processar_arquivo_isolado(args):
                 elif fm and col not in colunas_valores_txt:
                     cell.value = fm.replace("17", str(curr))
 
+            # Passamos os valores numéricos. O Excel encarrega-se de mostrar "R$ -" ou "R$ 00,00"
             ws.cell(curr, 1, d['dt'])
-            ws.cell(curr, 2, d['q'])
-            ws.cell(curr, 4, d.get('iprem') if d.get('iprem') > 0 else "")    
-            ws.cell(curr, 5, d.get('hspm') if d.get('hspm') > 0 else "")     
-            ws.cell(curr, 6, d.get('funfin') if d.get('funfin') > 0 else "")   
-            ws.cell(curr, 7, d.get('funprev') if d.get('funprev') > 0 else "") 
+            ws.cell(curr, 2, d['q']) 
+            ws.cell(curr, 4, d['iprem'])    
+            ws.cell(curr, 5, d['hspm'])     
+            ws.cell(curr, 6, d['funfin'])   
+            ws.cell(curr, 7, d['funprev']) 
 
             curr += 1
 
